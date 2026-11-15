@@ -4,13 +4,14 @@ AHNG MUSIC - ربات موسیقی روبیکا
 اجرا: BOT_TOKEN=xxxx python ahng_music_bot.py
 """
 import os
+import re
 import time
 import sqlite3
 import requests
 
 # ============ تنظیمات ============
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMINS = {"b0xxxxxxxxxxxxxxxx"}      # guid مدیرها (با /myid می‌گیرید)
+ADMINS = {"u0HbMCz07b206d47b6e01988bf7610cf"}      # guid مدیرها (با /myid می‌گیرید)
 BOT_USERNAME = "ahng_music_bot"      # آیدی ربات بدون @
 DB_FILE = os.getenv("DB_FILE", "ahng.db")
 API = f"https://botapi.rubika.ir/v3/{BOT_TOKEN}/"
@@ -112,7 +113,36 @@ def stats(chat_id):
     send(chat_id, txt)
 
 
+# ============ پنل مدیر ============
+def is_admin(guid):
+    return guid in ADMINS
+
+
+def admin_panel(chat_id):
+    rows = [
+        [simple_btn("adm:add", "➕ افزودن آهنگ"), simple_btn("adm:upload", "🚀 آپلود و انتشار")],
+        [simple_btn("adm:addch", "📢 ثبت کانال"), simple_btn("adm:stats", "📊 آمار")],
+        [simple_btn("adm:channels", "📋 کانال‌ها")],
+    ]
+    send(chat_id, "🛠 پنل مدیریت AHNG MUSIC\nیکی از گزینه‌ها را انتخاب کنید:", keypad(rows))
+
+
+def post_to_channels(sid, caption):
+    """انتشار آهنگ در کانال‌های ثبت‌شده با دکمه‌ی شیشه‌ای دریافت."""
+    row = db.execute("SELECT file_id FROM songs WHERE id=?", (sid,)).fetchone()
+    if not row:
+        return 0
+    kp = keypad([[link_btn("dl", "🎧 دریافت آهنگ", song_link(sid))]])
+    ok = 0
+    for guid, _ in channels():
+        res = call("sendFile", chat_id=guid, file_id=row[0], text=caption, inline_keypad=kp)
+        if res and res.get("status", "OK") == "OK":
+            ok += 1
+    return ok
+
+
 # ============ پیام‌ها ============
+admin_state = {}            # admin guid -> مرحله‌ی فعلی (افزودن/آپلود)
 pending_channel_link = {}   # admin guid -> لینک کانالی که منتظر فوروارد پست است
 
 
@@ -130,8 +160,30 @@ def handle_admin(m, chat_id, sender, text):
                    (title, artist, f["file_id"], int(time.time())))
         db.commit()
         sid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        st = admin_state.get(sender) or {}
+        if st.get("mode") == "await_song_upload":
+            admin_state[sender] = {"mode": "saved", "sid": sid}
+            return send(chat_id, f"✅ ذخیره شد: {title} - {artist}\nبرای ادامه دکمه‌ی زیر را بزنید:",
+                        keypad([[simple_btn(f"adm:text:{sid}", "✍️ نوشتن متن پست")]]))
+        admin_state.pop(sender, None)
         send(chat_id, f"✅ ذخیره شد: {title} - {artist}\nلینک اختصاصی (کپی کنید و در دکمه‌ی شیشه‌ای پست کانال بگذارید):")
         return send(chat_id, song_link(sid))
+
+    # مراحل آپلود: متن پست -> لینک اختصاصی -> تأیید نهایی
+    st = admin_state.get(sender) or {}
+    mode = st.get("mode")
+    if mode in ("await_text", "await_link") and text and not text.startswith("/"):
+        sid = st["sid"]
+        if mode == "await_text":
+            st["text"] = text
+            st["mode"] = "await_link"
+            return send(chat_id, "✅ متن ثبت شد.\nحالا لینک اختصاصی آهنگ را بفرستید:\n" + song_link(sid))
+        mm = re.search(r"song_(\d+)", text)
+        if not mm or mm.group(1) != str(sid):
+            return send(chat_id, "لینک درست نیست. لینک اختصاصی همین آهنگ را بفرستید:\n" + song_link(sid))
+        st["mode"] = "await_confirm"
+        return send(chat_id, f"پیش‌نمایش پست:\n\n{st['text']}\n\n@{BOT_USERNAME}\n\nتأیید می‌کنید در کانال منتشر شود؟",
+                    keypad([[simple_btn(f"adm:post:{sid}", "✅ تأیید نهایی"), simple_btn("adm:cancel", "❌ لغو")]]))
 
     # ۲) فوروارد پست کانال -> ثبت guid کانال
     if fwd and pending_channel_link.get(sender):
@@ -180,17 +232,63 @@ def handle_message(m, chat_id):
     if sender in ADMINS and handle_admin(m, chat_id, sender, text) is not None:
         return
 
+    if text == "/panel" and is_admin(sender):
+        return admin_panel(chat_id)
+
     if text.startswith("/start"):
         parts = text.split()
         payload = parts[1] if len(parts) > 1 else (m.get("aux_data") or {}).get("start_id", "")
         if payload:
             return deliver(chat_id, sender, payload)
+        if is_admin(sender):
+            return admin_panel(chat_id)
         return send(chat_id, "سلام 👋 به AHNG MUSIC خوش آمدید.\nبرای دریافت آهنگ از دکمه‌ی دانلود زیر پست‌های کانال استفاده کنید.")
 
 
 def handle_button(inline, chat_id):
     bid = (inline.get("aux_data") or {}).get("button_id", "")
     sender = inline.get("sender_id", chat_id)
+
+    # دکمه‌های پنل مدیر: فقط برای ادمین‌ها
+    if bid.startswith("adm:"):
+        if not is_admin(sender):
+            return
+        if bid == "adm:add":
+            admin_state[sender] = {"mode": "await_song_add"}
+            send(chat_id, "➕ آهنگ را بفرستید یا فوروارد کنید.\n"
+                          "(در کپشن می‌توانید بنویسید: اسم آهنگ | خواننده)\n"
+                          "بعد از ذخیره، لینک اختصاصی آهنگ را می‌گیرید.")
+        elif bid == "adm:upload":
+            admin_state[sender] = {"mode": "await_song_upload"}
+            send(chat_id, "🚀 آهنگ را بفرستید یا فوروارد کنید.\n"
+                          "(در کپشن می‌توانید بنویسید: اسم آهنگ | خواننده)")
+        elif bid.startswith("adm:text:"):
+            admin_state[sender] = {"mode": "await_text", "sid": bid[9:]}
+            send(chat_id, "✍️ متن پست را بنویسید و بفرستید:")
+        elif bid.startswith("adm:post:"):
+            st = admin_state.get(sender) or {}
+            sid = bid[9:]
+            if st.get("mode") != "await_confirm" or str(st.get("sid")) != sid:
+                send(chat_id, "این درخواست منقضی شده. دوباره از پنل شروع کنید: /panel")
+            elif not channels():
+                send(chat_id, "کانالی ثبت نشده. اول «📢 ثبت کانال» را بزنید.")
+            else:
+                n = post_to_channels(sid, f"{st.get('text', '')}\n\n@{BOT_USERNAME}")
+                admin_state.pop(sender, None)
+                send(chat_id, f"✅ منتشر شد در {n} کانال." if n else "❌ ارسال به کانال انجام نشد. ربات باید ادمین کانال باشد.")
+        elif bid == "adm:cancel":
+            admin_state.pop(sender, None)
+            send(chat_id, "لغو شد. برای پنل: /panel")
+        elif bid == "adm:addch":
+            send(chat_id, "📢 لینک یا آیدی کانال را بفرستید (مثل @mychannel).\n"
+                          "بعد یک پست از همان کانال را برای من فوروارد کنید.\n"
+                          "ربات باید ادمین کانال باشد.")
+        elif bid == "adm:stats":
+            stats(chat_id)
+        elif bid == "adm:channels":
+            send(chat_id, "\n".join(f"{g} | {l}" for g, l in channels()) or "کانالی ثبت نشده.")
+        return
+
     if bid.startswith("joined:"):
         payload = bid[7:]
         if is_member(sender):
