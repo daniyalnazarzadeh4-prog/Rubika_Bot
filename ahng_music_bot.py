@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-AHNG MUSIC - Ø±Ø¨Ø§Øª Ù…ÙˆØ³ÛŒÙ‚ÛŒ Ø±ÙˆØ¨ÛŒÚ©Ø§
-Ø§Ø¬Ø±Ø§: BOT_TOKEN=xxxx python ahng_music_bot.py
+AHNG MUSIC - \u0631\u0628\u0627\u062a \u0645\u0648\u0633\u06cc\u0642\u06cc \u0631\u0648\u0628\u06cc\u06a9\u0627
+\u0627\u062c\u0631\u0627: BOT_TOKEN=xxxx python ahng_music_bot.py
 """
 import os
 import re
@@ -9,14 +9,14 @@ import time
 import sqlite3
 import requests
 
-# ============ ØªÙ†Ø¸ÛŒÙ…Ø§Øª ============
+# ============ \u062a\u0646\u0638\u06cc\u0645\u0627\u062a ============
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMINS = {"u0HbMCz07b206d47b6e01988bf7610cf"}      # guid Ù…Ø¯ÛŒØ±Ù‡Ø§ (Ø¨Ø§ /myid Ù…ÛŒâ€ŒÚ¯ÛŒØ±ÛŒØ¯)
-BOT_USERNAME = "ahng_music_bot"      # Ø¢ÛŒØ¯ÛŒ Ø±Ø¨Ø§Øª Ø¨Ø¯ÙˆÙ† @
+ADMINS = {"u0HbMCz07b206d47b6e01988bf7610cf"}      # guid \u0645\u062f\u06cc\u0631\u0647\u0627 (\u0628\u0627 /myid \u0645\u06cc\u200c\u06af\u06cc\u0631\u06cc\u062f)
+BOT_USERNAME = "ahng_music_bot"      # \u0622\u06cc\u062f\u06cc \u0631\u0628\u0627\u062a \u0628\u062f\u0648\u0646 @
 DB_FILE = os.getenv("DB_FILE", "ahng.db")
 API = f"https://botapi.rubika.ir/v3/{BOT_TOKEN}/"
 
-# ============ Ø¯ÛŒØªØ§Ø¨ÛŒØ³ ============
+# ============ \u062f\u06cc\u062a\u0627\u0628\u06cc\u0633 ============
 db = sqlite3.connect(DB_FILE, check_same_thread=False)
 db.executescript("""
 CREATE TABLE IF NOT EXISTS songs(
@@ -57,13 +57,13 @@ def keypad(rows):
     return {"rows": [{"buttons": r} for r in rows]}
 
 
-# ============ Ú©Ø§Ù†Ø§Ù„â€ŒÙ‡Ø§ Ùˆ Ø¹Ø¶ÙˆÛŒØª ============
+# ============ \u06a9\u0627\u0646\u0627\u0644\u200c\u0647\u0627 \u0648 \u0639\u0636\u0648\u06cc\u062a ============
 def channels():
     return db.execute("SELECT guid, link FROM channels").fetchall()
 
 
 def is_member(user_guid):
-    """Ù‡Ø± Ø¨Ø§Ø± Ø§Ø² Ø±ÙˆØ¨ÛŒÚ©Ø§ Ù¾Ø±Ø³ÛŒØ¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯ (Ø°Ø®ÛŒØ±Ù‡ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯)ØŒ Ù¾Ø³ Ø®Ø±ÙˆØ¬ Ø§Ø² Ú©Ø§Ù†Ø§Ù„ Ù‡Ù… Ø¯ÛŒØ¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯."""
+    """\u0647\u0631 \u0628\u0627\u0631 \u0627\u0632 \u0631\u0648\u0628\u06cc\u06a9\u0627 \u067e\u0631\u0633\u06cc\u062f\u0647 \u0645\u06cc\u200c\u0634\u0648\u062f (\u0630\u062e\u06cc\u0631\u0647 \u0646\u0645\u06cc\u200c\u0634\u0648\u062f)\u060c \u067e\u0633 \u062e\u0631\u0648\u062c \u0627\u0632 \u06a9\u0627\u0646\u0627\u0644 \u0647\u0645 \u062f\u06cc\u062f\u0647 \u0645\u06cc\u200c\u0634\u0648\u062f."""
     for guid, _ in channels():
         res = call("getChatMember", chat_id=guid, user_id=user_guid)
         status = str((res.get("data") or {}).get("status", "")).lower()
@@ -73,13 +73,13 @@ def is_member(user_guid):
 
 
 def join_prompt(chat_id, payload):
-    rows = [[link_btn(f"ch{i}", f"ðŸ“¢ Ú©Ø§Ù†Ø§Ù„ {i + 1}", link)] for i, (_, link) in enumerate(channels())]
-    rows.append([simple_btn(f"joined:{payload}", "âœ… ØªØ£ÛŒÛŒØ¯ Ø¹Ø¶ÙˆÛŒØª")])
-    send(chat_id, "Ø¨Ø±Ø§ÛŒ Ø¯Ø±ÛŒØ§ÙØª Ø¢Ù‡Ù†Ú¯ Ø§Ø¨ØªØ¯Ø§ Ø¯Ø± Ú©Ø§Ù†Ø§Ù„(Ù‡Ø§ÛŒ) Ø²ÛŒØ± Ø¹Ø¶Ùˆ Ø´ÙˆÛŒØ¯ØŒ Ø³Ù¾Ø³ Â«ØªØ£ÛŒÛŒØ¯ Ø¹Ø¶ÙˆÛŒØªÂ» Ø±Ø§ Ø¨Ø²Ù†ÛŒØ¯.",
+    rows = [[link_btn(f"ch{i}", f"\U0001f4e2 \u06a9\u0627\u0646\u0627\u0644 {i + 1}", link)] for i, (_, link) in enumerate(channels())]
+    rows.append([simple_btn(f"joined:{payload}", "\u2705 \u062a\u0623\u06cc\u06cc\u062f \u0639\u0636\u0648\u06cc\u062a")])
+    send(chat_id, "\u0628\u0631\u0627\u06cc \u062f\u0631\u06cc\u0627\u0641\u062a \u0622\u0647\u0646\u06af \u0627\u0628\u062a\u062f\u0627 \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644(\u0647\u0627\u06cc) \u0632\u06cc\u0631 \u0639\u0636\u0648 \u0634\u0648\u06cc\u062f\u060c \u0633\u067e\u0633 \xab\u062a\u0623\u06cc\u06cc\u062f \u0639\u0636\u0648\u06cc\u062a\xbb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f.",
          keypad(rows))
 
 
-# ============ Ø¢Ù‡Ù†Ú¯â€ŒÙ‡Ø§ ============
+# ============ \u0622\u0647\u0646\u06af\u200c\u0647\u0627 ============
 def song_link(sid):
     return f"https://rubika.ir/{BOT_USERNAME}?start=song_{sid}"
 
@@ -87,16 +87,16 @@ def song_link(sid):
 def send_song(chat_id, song_id):
     row = db.execute("SELECT title, artist, file_id FROM songs WHERE id=?", (song_id,)).fetchone()
     if not row:
-        return send(chat_id, "Ø¢Ù‡Ù†Ú¯ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.")
+        return send(chat_id, "\u0622\u0647\u0646\u06af \u067e\u06cc\u062f\u0627 \u0646\u0634\u062f.")
     title, artist, file_id = row
     call("sendFile", chat_id=chat_id, file_id=file_id,
-         text=f"ðŸŽµ {title}\nðŸŽ¤ {artist}\n\n@{BOT_USERNAME}")
+         text=f"\U0001f3b5 {title}\n\U0001f3a4 {artist}\n\n@{BOT_USERNAME}")
     db.execute("UPDATE songs SET downloads=downloads+1 WHERE id=?", (song_id,))
     db.commit()
 
 
 def deliver(chat_id, user_guid, payload):
-    """Ø¯Ø±ÛŒØ§ÙØª Ø¢Ù‡Ù†Ú¯: Ø§Ú¯Ø± Ø¹Ø¶Ùˆ Ù†Ø¨Ø§Ø´Ø¯ Ø¹Ø¶ÙˆÛŒØª Ø§Ø¬Ø¨Ø§Ø±ÛŒØŒ ÙˆÚ¯Ø±Ù†Ù‡ Ø§Ø±Ø³Ø§Ù„."""
+    """\u062f\u0631\u06cc\u0627\u0641\u062a \u0622\u0647\u0646\u06af: \u0627\u06af\u0631 \u0639\u0636\u0648 \u0646\u0628\u0627\u0634\u062f \u0639\u0636\u0648\u06cc\u062a \u0627\u062c\u0628\u0627\u0631\u06cc\u060c \u0648\u06af\u0631\u0646\u0647 \u0627\u0631\u0633\u0627\u0644."""
     if not payload.startswith("song_"):
         return
     if channels() and not is_member(user_guid):
@@ -108,31 +108,31 @@ def stats(chat_id):
     users = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     songs, dl = db.execute("SELECT COUNT(*), COALESCE(SUM(downloads),0) FROM songs").fetchone()
     best = db.execute("SELECT id, title, downloads FROM songs ORDER BY downloads DESC LIMIT 10").fetchall()
-    txt = f"ðŸ“Š Ø¢Ù…Ø§Ø± AHNG MUSIC\nðŸ‘¤ Ú©Ø§Ø±Ø¨Ø±Ø§Ù†: {users}\nðŸŽµ Ø¢Ù‡Ù†Ú¯â€ŒÙ‡Ø§: {songs}\nâ¬‡ï¸ Ø¯Ø§Ù†Ù„ÙˆØ¯Ù‡Ø§: {dl}\n\n"
-    txt += "\n".join(f"{i}. {t} â† {d}" for i, t, d in best)
+    txt = f"\U0001f4ca \u0622\u0645\u0627\u0631 AHNG MUSIC\n\U0001f464 \u06a9\u0627\u0631\u0628\u0631\u0627\u0646: {users}\n\U0001f3b5 \u0622\u0647\u0646\u06af\u200c\u0647\u0627: {songs}\n\u2b07\ufe0f \u062f\u0627\u0646\u0644\u0648\u062f\u0647\u0627: {dl}\n\n"
+    txt += "\n".join(f"{i}. {t} \u2190 {d}" for i, t, d in best)
     send(chat_id, txt)
 
 
-# ============ Ù¾Ù†Ù„ Ù…Ø¯ÛŒØ± ============
+# ============ \u067e\u0646\u0644 \u0645\u062f\u06cc\u0631 ============
 def is_admin(guid):
     return guid in ADMINS
 
 
 def admin_panel(chat_id):
     rows = [
-        [simple_btn("adm:add", "âž• Ø§ÙØ²ÙˆØ¯Ù† Ø¢Ù‡Ù†Ú¯"), simple_btn("adm:upload", "ðŸš€ Ø¢Ù¾Ù„ÙˆØ¯ Ùˆ Ø§Ù†ØªØ´Ø§Ø±")],
-        [simple_btn("adm:addch", "ðŸ“¢ Ø«Ø¨Øª Ú©Ø§Ù†Ø§Ù„"), simple_btn("adm:stats", "ðŸ“Š Ø¢Ù…Ø§Ø±")],
-        [simple_btn("adm:channels", "ðŸ“‹ Ú©Ø§Ù†Ø§Ù„â€ŒÙ‡Ø§")],
+        [simple_btn("adm:add", "\u2795 \u0627\u0641\u0632\u0648\u062f\u0646 \u0622\u0647\u0646\u06af"), simple_btn("adm:upload", "\U0001f680 \u0622\u067e\u0644\u0648\u062f \u0648 \u0627\u0646\u062a\u0634\u0627\u0631")],
+        [simple_btn("adm:addch", "\U0001f4e2 \u062b\u0628\u062a \u06a9\u0627\u0646\u0627\u0644"), simple_btn("adm:stats", "\U0001f4ca \u0622\u0645\u0627\u0631")],
+        [simple_btn("adm:channels", "\U0001f4cb \u06a9\u0627\u0646\u0627\u0644\u200c\u0647\u0627")],
     ]
-    send(chat_id, "ðŸ›  Ù¾Ù†Ù„ Ù…Ø¯ÛŒØ±ÛŒØª AHNG MUSIC\nÛŒÚ©ÛŒ Ø§Ø² Ú¯Ø²ÛŒÙ†Ù‡â€ŒÙ‡Ø§ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯:", keypad(rows))
+    send(chat_id, "\U0001f6e0 \u067e\u0646\u0644 \u0645\u062f\u06cc\u0631\u06cc\u062a AHNG MUSIC\n\u06cc\u06a9\u06cc \u0627\u0632 \u06af\u0632\u06cc\u0646\u0647\u200c\u0647\u0627 \u0631\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f:", keypad(rows))
 
 
 def post_to_channels(sid, caption):
-    """Ø§Ù†ØªØ´Ø§Ø± Ø¢Ù‡Ù†Ú¯ Ø¯Ø± Ú©Ø§Ù†Ø§Ù„â€ŒÙ‡Ø§ÛŒ Ø«Ø¨Øªâ€ŒØ´Ø¯Ù‡ Ø¨Ø§ Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ Ø¯Ø±ÛŒØ§ÙØª."""
+    """\u0627\u0646\u062a\u0634\u0627\u0631 \u0622\u0647\u0646\u06af \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644\u200c\u0647\u0627\u06cc \u062b\u0628\u062a\u200c\u0634\u062f\u0647 \u0628\u0627 \u062f\u06a9\u0645\u0647\u200c\u06cc \u0634\u06cc\u0634\u0647\u200c\u0627\u06cc \u062f\u0631\u06cc\u0627\u0641\u062a."""
     row = db.execute("SELECT file_id FROM songs WHERE id=?", (sid,)).fetchone()
     if not row:
         return 0
-    kp = keypad([[link_btn("dl", "ðŸŽ§ Ø¯Ø±ÛŒØ§ÙØª Ø¢Ù‡Ù†Ú¯", song_link(sid))]])
+    kp = keypad([[link_btn("dl", "\U0001f3a7 \u062f\u0631\u06cc\u0627\u0641\u062a \u0622\u0647\u0646\u06af", song_link(sid))]])
     ok = 0
     for guid, _ in channels():
         res = call("sendFile", chat_id=guid, file_id=row[0], text=caption, inline_keypad=kp)
@@ -141,18 +141,18 @@ def post_to_channels(sid, caption):
     return ok
 
 
-# ============ Ù¾ÛŒØ§Ù…â€ŒÙ‡Ø§ ============
-admin_state = {}            # admin guid -> Ù…Ø±Ø­Ù„Ù‡â€ŒÛŒ ÙØ¹Ù„ÛŒ (Ø§ÙØ²ÙˆØ¯Ù†/Ø¢Ù¾Ù„ÙˆØ¯)
-pending_channel_link = {}   # admin guid -> Ù„ÛŒÙ†Ú© Ú©Ø§Ù†Ø§Ù„ÛŒ Ú©Ù‡ Ù…Ù†ØªØ¸Ø± ÙÙˆØ±ÙˆØ§Ø±Ø¯ Ù¾Ø³Øª Ø§Ø³Øª
+# ============ \u067e\u06cc\u0627\u0645\u200c\u0647\u0627 ============
+admin_state = {}            # admin guid -> \u0645\u0631\u062d\u0644\u0647\u200c\u06cc \u0641\u0639\u0644\u06cc (\u0627\u0641\u0632\u0648\u062f\u0646/\u0622\u067e\u0644\u0648\u062f)
+pending_channel_link = {}   # admin guid -> \u0644\u06cc\u0646\u06a9 \u06a9\u0627\u0646\u0627\u0644\u06cc \u06a9\u0647 \u0645\u0646\u062a\u0638\u0631 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u067e\u0633\u062a \u0627\u0633\u062a
 
 
 def handle_admin(m, chat_id, sender, text):
     f = m.get("file")
     fwd = m.get("forwarded_from") or {}
 
-    # Û±) ÙØ±Ø³ØªØ§Ø¯Ù† Ø¢Ù‡Ù†Ú¯ -> Ø°Ø®ÛŒØ±Ù‡ + Ø³Ø§Ø®Øª Ù„ÛŒÙ†Ú© Ø§Ø®ØªØµØ§ØµÛŒ
+    # \u06f1) \u0641\u0631\u0633\u062a\u0627\u062f\u0646 \u0622\u0647\u0646\u06af -> \u0630\u062e\u06cc\u0631\u0647 + \u0633\u0627\u062e\u062a \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc
     if f:
-        name = (f.get("file_name") or "Ø¢Ù‡Ù†Ú¯").rsplit(".", 1)[0]
+        name = (f.get("file_name") or "\u0622\u0647\u0646\u06af").rsplit(".", 1)[0]
         title, artist = (name, "-")
         if text:
             title, artist = [x.strip() for x in (text.split("|", 1) + ["-"])[:2]]
@@ -163,13 +163,13 @@ def handle_admin(m, chat_id, sender, text):
         st = admin_state.get(sender) or {}
         if st.get("mode") == "await_song_upload":
             admin_state[sender] = {"mode": "saved", "sid": sid}
-            return send(chat_id, f"âœ… Ø°Ø®ÛŒØ±Ù‡ Ø´Ø¯: {title} - {artist}\nØ¨Ø±Ø§ÛŒ Ø§Ø¯Ø§Ù…Ù‡ Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø²ÛŒØ± Ø±Ø§ Ø¨Ø²Ù†ÛŒØ¯:",
-                        keypad([[simple_btn(f"adm:text:{sid}", "âœï¸ Ù†ÙˆØ´ØªÙ† Ù…ØªÙ† Ù¾Ø³Øª")]]))
+            return send(chat_id, f"\u2705 \u0630\u062e\u06cc\u0631\u0647 \u0634\u062f: {title} - {artist}\n\u0628\u0631\u0627\u06cc \u0627\u062f\u0627\u0645\u0647 \u062f\u06a9\u0645\u0647\u200c\u06cc \u0632\u06cc\u0631 \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f:",
+                        keypad([[simple_btn(f"adm:text:{sid}", "\u270d\ufe0f \u0646\u0648\u0634\u062a\u0646 \u0645\u062a\u0646 \u067e\u0633\u062a")]]))
         admin_state.pop(sender, None)
-        send(chat_id, f"âœ… Ø°Ø®ÛŒØ±Ù‡ Ø´Ø¯: {title} - {artist}\nÙ„ÛŒÙ†Ú© Ø§Ø®ØªØµØ§ØµÛŒ (Ú©Ù¾ÛŒ Ú©Ù†ÛŒØ¯ Ùˆ Ø¯Ø± Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ Ù¾Ø³Øª Ú©Ø§Ù†Ø§Ù„ Ø¨Ú¯Ø°Ø§Ø±ÛŒØ¯):")
+        send(chat_id, f"\u2705 \u0630\u062e\u06cc\u0631\u0647 \u0634\u062f: {title} - {artist}\n\u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc (\u06a9\u067e\u06cc \u06a9\u0646\u06cc\u062f \u0648 \u062f\u0631 \u062f\u06a9\u0645\u0647\u200c\u06cc \u0634\u06cc\u0634\u0647\u200c\u0627\u06cc \u067e\u0633\u062a \u06a9\u0627\u0646\u0627\u0644 \u0628\u06af\u0630\u0627\u0631\u06cc\u062f):")
         return send(chat_id, song_link(sid))
 
-    # Ù…Ø±Ø§Ø­Ù„ Ø¢Ù¾Ù„ÙˆØ¯: Ù…ØªÙ† Ù¾Ø³Øª -> Ù„ÛŒÙ†Ú© Ø§Ø®ØªØµØ§ØµÛŒ -> ØªØ£ÛŒÛŒØ¯ Ù†Ù‡Ø§ÛŒÛŒ
+    # \u0645\u0631\u0627\u062d\u0644 \u0622\u067e\u0644\u0648\u062f: \u0645\u062a\u0646 \u067e\u0633\u062a -> \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc -> \u062a\u0623\u06cc\u06cc\u062f \u0646\u0647\u0627\u06cc\u06cc
     st = admin_state.get(sender) or {}
     mode = st.get("mode")
     if mode in ("await_text", "await_link") and text and not text.startswith("/"):
@@ -177,23 +177,23 @@ def handle_admin(m, chat_id, sender, text):
         if mode == "await_text":
             st["text"] = text
             st["mode"] = "await_link"
-            return send(chat_id, "âœ… Ù…ØªÙ† Ø«Ø¨Øª Ø´Ø¯.\nØ­Ø§Ù„Ø§ Ù„ÛŒÙ†Ú© Ø§Ø®ØªØµØ§ØµÛŒ Ø¢Ù‡Ù†Ú¯ Ø±Ø§ Ø¨ÙØ±Ø³ØªÛŒØ¯:\n" + song_link(sid))
+            return send(chat_id, "\u2705 \u0645\u062a\u0646 \u062b\u0628\u062a \u0634\u062f.\n\u062d\u0627\u0644\u0627 \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc \u0622\u0647\u0646\u06af \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f:\n" + song_link(sid))
         mm = re.search(r"song_(\d+)", text)
         if not mm or mm.group(1) != str(sid):
-            return send(chat_id, "Ù„ÛŒÙ†Ú© Ø¯Ø±Ø³Øª Ù†ÛŒØ³Øª. Ù„ÛŒÙ†Ú© Ø§Ø®ØªØµØ§ØµÛŒ Ù‡Ù…ÛŒÙ† Ø¢Ù‡Ù†Ú¯ Ø±Ø§ Ø¨ÙØ±Ø³ØªÛŒØ¯:\n" + song_link(sid))
+            return send(chat_id, "\u0644\u06cc\u0646\u06a9 \u062f\u0631\u0633\u062a \u0646\u06cc\u0633\u062a. \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc \u0647\u0645\u06cc\u0646 \u0622\u0647\u0646\u06af \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f:\n" + song_link(sid))
         st["mode"] = "await_confirm"
-        return send(chat_id, f"Ù¾ÛŒØ´â€ŒÙ†Ù…Ø§ÛŒØ´ Ù¾Ø³Øª:\n\n{st['text']}\n\n@{BOT_USERNAME}\n\nØªØ£ÛŒÛŒØ¯ Ù…ÛŒâ€ŒÚ©Ù†ÛŒØ¯ Ø¯Ø± Ú©Ø§Ù†Ø§Ù„ Ù…Ù†ØªØ´Ø± Ø´ÙˆØ¯ØŸ",
-                    keypad([[simple_btn(f"adm:post:{sid}", "âœ… ØªØ£ÛŒÛŒØ¯ Ù†Ù‡Ø§ÛŒÛŒ"), simple_btn("adm:cancel", "âŒ Ù„ØºÙˆ")]]))
+        return send(chat_id, f"\u067e\u06cc\u0634\u200c\u0646\u0645\u0627\u06cc\u0634 \u067e\u0633\u062a:\n\n{st['text']}\n\n@{BOT_USERNAME}\n\n\u062a\u0623\u06cc\u06cc\u062f \u0645\u06cc\u200c\u06a9\u0646\u06cc\u062f \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644 \u0645\u0646\u062a\u0634\u0631 \u0634\u0648\u062f\u061f",
+                    keypad([[simple_btn(f"adm:post:{sid}", "\u2705 \u062a\u0623\u06cc\u06cc\u062f \u0646\u0647\u0627\u06cc\u06cc"), simple_btn("adm:cancel", "\u274c \u0644\u063a\u0648")]]))
 
-    # Û²) ÙÙˆØ±ÙˆØ§Ø±Ø¯ Ù¾Ø³Øª Ú©Ø§Ù†Ø§Ù„ -> Ø«Ø¨Øª guid Ú©Ø§Ù†Ø§Ù„
+    # \u06f2) \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u067e\u0633\u062a \u06a9\u0627\u0646\u0627\u0644 -> \u062b\u0628\u062a guid \u06a9\u0627\u0646\u0627\u0644
     if fwd and pending_channel_link.get(sender):
         guid = fwd.get("from_chat_id")
         if guid:
             db.execute("INSERT OR REPLACE INTO channels VALUES(?,?)", (guid, pending_channel_link.pop(sender)))
             db.commit()
-            return send(chat_id, "âœ… Ú©Ø§Ù†Ø§Ù„ Ø«Ø¨Øª Ø´Ø¯. ÛŒØ§Ø¯ØªØ§Ù† Ø¨Ø§Ø´Ø¯ Ø±Ø¨Ø§Øª Ø¯Ø± Ú©Ø§Ù†Ø§Ù„ Ø§Ø¯Ù…ÛŒÙ† Ø¨Ø§Ø´Ø¯.")
+            return send(chat_id, "\u2705 \u06a9\u0627\u0646\u0627\u0644 \u062b\u0628\u062a \u0634\u062f. \u06cc\u0627\u062f\u062a\u0627\u0646 \u0628\u0627\u0634\u062f \u0631\u0628\u0627\u062a \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644 \u0627\u062f\u0645\u06cc\u0646 \u0628\u0627\u0634\u062f.")
 
-    # Û³) Ù„ÛŒÙ†Ú© Ú©Ø§Ù†Ø§Ù„ -> ØªÙ„Ø§Ø´ Ø¨Ø±Ø§ÛŒ Ø¹Ø¶Ùˆ Ø´Ø¯Ù† + Ø¯Ø±Ø®ÙˆØ§Ø³Øª ÙÙˆØ±ÙˆØ§Ø±Ø¯
+    # \u06f3) \u0644\u06cc\u0646\u06a9 \u06a9\u0627\u0646\u0627\u0644 -> \u062a\u0644\u0627\u0634 \u0628\u0631\u0627\u06cc \u0639\u0636\u0648 \u0634\u062f\u0646 + \u062f\u0631\u062e\u0648\u0627\u0633\u062a \u0641\u0648\u0631\u0648\u0627\u0631\u062f
     first = text.split()[0] if text else ""
     is_username = first.startswith("@") and len(first) > 2 and first[1:].lower() != BOT_USERNAME.lower()
     is_link = ("rubika.ir/" in first or "rubika.me/" in first) and BOT_USERNAME.lower() not in first.lower()
@@ -201,22 +201,22 @@ def handle_admin(m, chat_id, sender, text):
         if True:
             link = "https://rubika.ir/" + first[1:] if is_username else first
             pending_channel_link[sender] = link
-            call("joinChannelByLink", link=link)   # Ù…Ù…Ú©Ù† Ø§Ø³Øª Ø¯Ø± Bot API Ù¾Ø´ØªÛŒØ¨Ø§Ù†ÛŒ Ù†Ø´ÙˆØ¯
-            return send(chat_id, "Ù„ÛŒÙ†Ú© Ø«Ø¨Øª Ø´Ø¯. Ø­Ø§Ù„Ø§ ÛŒÚ© Ù¾Ø³Øª Ø§Ø² Ù‡Ù…Ø§Ù† Ú©Ø§Ù†Ø§Ù„ Ø±Ø§ Ø¨Ø±Ø§ÛŒ Ù…Ù† ÙÙˆØ±ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯ ØªØ§ Ø´Ù†Ø§Ø³Ù‡â€ŒÛŒ Ú©Ø§Ù†Ø§Ù„ Ø±Ø§ Ø¨Ú¯ÛŒØ±Ù….\n"
-                                 "(Ø§Ú¯Ø± Ø±Ø¨Ø§Øª Ø®ÙˆØ¯Ø´ Ø¹Ø¶Ùˆ Ù†Ø´Ø¯ØŒ Ø¢Ù† Ø±Ø§ Ø§Ø¯Ù…ÛŒÙ† Ú©Ø§Ù†Ø§Ù„ Ú©Ù†ÛŒØ¯.)")
+            call("joinChannelByLink", link=link)   # \u0645\u0645\u06a9\u0646 \u0627\u0633\u062a \u062f\u0631 Bot API \u067e\u0634\u062a\u06cc\u0628\u0627\u0646\u06cc \u0646\u0634\u0648\u062f
+            return send(chat_id, "\u0644\u06cc\u0646\u06a9 \u062b\u0628\u062a \u0634\u062f. \u062d\u0627\u0644\u0627 \u06cc\u06a9 \u067e\u0633\u062a \u0627\u0632 \u0647\u0645\u0627\u0646 \u06a9\u0627\u0646\u0627\u0644 \u0631\u0627 \u0628\u0631\u0627\u06cc \u0645\u0646 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f \u062a\u0627 \u0634\u0646\u0627\u0633\u0647\u200c\u06cc \u06a9\u0627\u0646\u0627\u0644 \u0631\u0627 \u0628\u06af\u06cc\u0631\u0645.\n"
+                                 "(\u0627\u06af\u0631 \u0631\u0628\u0627\u062a \u062e\u0648\u062f\u0634 \u0639\u0636\u0648 \u0646\u0634\u062f\u060c \u0622\u0646 \u0631\u0627 \u0627\u062f\u0645\u06cc\u0646 \u06a9\u0627\u0646\u0627\u0644 \u06a9\u0646\u06cc\u062f.)")
 
     if text == "/stats":
         return stats(chat_id)
     if text == "/channels":
-        return send(chat_id, "\n".join(f"{g} | {l}" for g, l in channels()) or "Ú©Ø§Ù†Ø§Ù„ÛŒ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡.")
+        return send(chat_id, "\n".join(f"{g} | {l}" for g, l in channels()) or "\u06a9\u0627\u0646\u0627\u0644\u06cc \u062b\u0628\u062a \u0646\u0634\u062f\u0647.")
     if text.startswith("/delchannel "):
         db.execute("DELETE FROM channels WHERE guid=?", (text.split()[1],))
         db.commit()
-        return send(chat_id, "Ø­Ø°Ù Ø´Ø¯.")
+        return send(chat_id, "\u062d\u0630\u0641 \u0634\u062f.")
     if text.startswith("/del "):
         db.execute("DELETE FROM songs WHERE id=?", (text.split()[1],))
         db.commit()
-        return send(chat_id, "Ø¢Ù‡Ù†Ú¯ Ø­Ø°Ù Ø´Ø¯.")
+        return send(chat_id, "\u0622\u0647\u0646\u06af \u062d\u0630\u0641 \u0634\u062f.")
     return None
 
 
@@ -226,14 +226,14 @@ def handle_message(m, chat_id):
     db.execute("INSERT OR IGNORE INTO users VALUES(?,?)", (sender, int(time.time())))
     db.commit()
 
-    # ÙØ´Ø±Ø¯Ù† Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ Ù…Ù…Ú©Ù† Ø§Ø³Øª Ø¨Ù‡ Ø´Ú©Ù„ Ù¾ÛŒØ§Ù… Ø¹Ø§Ø¯ÛŒ Ø¨Ø§ aux_data.button_id Ø¨Ø±Ø³Ø¯
+    # \u0641\u0634\u0631\u062f\u0646 \u062f\u06a9\u0645\u0647\u200c\u06cc \u0634\u06cc\u0634\u0647\u200c\u0627\u06cc \u0645\u0645\u06a9\u0646 \u0627\u0633\u062a \u0628\u0647 \u0634\u06a9\u0644 \u067e\u06cc\u0627\u0645 \u0639\u0627\u062f\u06cc \u0628\u0627 aux_data.button_id \u0628\u0631\u0633\u062f
     aux = m.get("aux_data") or {}
     if aux.get("button_id"):
         print("BUTTON (message):", aux.get("button_id"), "from", sender)
         return handle_button({"aux_data": aux, "sender_id": sender}, chat_id)
 
     if text == "/myid":
-        return send(chat_id, f"guid Ø´Ù…Ø§:\n{sender}")
+        return send(chat_id, f"guid \u0634\u0645\u0627:\n{sender}")
 
     if sender in ADMINS and handle_admin(m, chat_id, sender, text) is not None:
         return
@@ -248,51 +248,51 @@ def handle_message(m, chat_id):
             return deliver(chat_id, sender, payload)
         if is_admin(sender):
             return admin_panel(chat_id)
-        return send(chat_id, "Ø³Ù„Ø§Ù… ðŸ‘‹ Ø¨Ù‡ AHNG MUSIC Ø®ÙˆØ´ Ø¢Ù…Ø¯ÛŒØ¯.\nØ¨Ø±Ø§ÛŒ Ø¯Ø±ÛŒØ§ÙØª Ø¢Ù‡Ù†Ú¯ Ø§Ø² Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø¯Ø§Ù†Ù„ÙˆØ¯ Ø²ÛŒØ± Ù¾Ø³Øªâ€ŒÙ‡Ø§ÛŒ Ú©Ø§Ù†Ø§Ù„ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ú©Ù†ÛŒØ¯.")
+        return send(chat_id, "\u0633\u0644\u0627\u0645 \U0001f44b \u0628\u0647 AHNG MUSIC \u062e\u0648\u0634 \u0622\u0645\u062f\u06cc\u062f.\n\u0628\u0631\u0627\u06cc \u062f\u0631\u06cc\u0627\u0641\u062a \u0622\u0647\u0646\u06af \u0627\u0632 \u062f\u06a9\u0645\u0647\u200c\u06cc \u062f\u0627\u0646\u0644\u0648\u062f \u0632\u06cc\u0631 \u067e\u0633\u062a\u200c\u0647\u0627\u06cc \u06a9\u0627\u0646\u0627\u0644 \u0627\u0633\u062a\u0641\u0627\u062f\u0647 \u06a9\u0646\u06cc\u062f.")
 
 
 def handle_button(inline, chat_id):
     bid = (inline.get("aux_data") or {}).get("button_id") or inline.get("button_id") or ""
     sender = inline.get("sender_id", chat_id)
 
-    # Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ Ù¾Ù†Ù„ Ù…Ø¯ÛŒØ±: ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø§Ø¯Ù…ÛŒÙ†â€ŒÙ‡Ø§
+    # \u062f\u06a9\u0645\u0647\u200c\u0647\u0627\u06cc \u067e\u0646\u0644 \u0645\u062f\u06cc\u0631: \u0641\u0642\u0637 \u0628\u0631\u0627\u06cc \u0627\u062f\u0645\u06cc\u0646\u200c\u0647\u0627
     if bid.startswith("adm:"):
         if not is_admin(sender):
             return
         if bid == "adm:add":
             admin_state[sender] = {"mode": "await_song_add"}
-            send(chat_id, "âž• Ø¢Ù‡Ù†Ú¯ Ø±Ø§ Ø¨ÙØ±Ø³ØªÛŒØ¯ ÛŒØ§ ÙÙˆØ±ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯.\n"
-                          "(Ø¯Ø± Ú©Ù¾Ø´Ù† Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒØ¯ Ø¨Ù†ÙˆÛŒØ³ÛŒØ¯: Ø§Ø³Ù… Ø¢Ù‡Ù†Ú¯ | Ø®ÙˆØ§Ù†Ù†Ø¯Ù‡)\n"
-                          "Ø¨Ø¹Ø¯ Ø§Ø² Ø°Ø®ÛŒØ±Ù‡ØŒ Ù„ÛŒÙ†Ú© Ø§Ø®ØªØµØ§ØµÛŒ Ø¢Ù‡Ù†Ú¯ Ø±Ø§ Ù…ÛŒâ€ŒÚ¯ÛŒØ±ÛŒØ¯.")
+            send(chat_id, "\u2795 \u0622\u0647\u0646\u06af \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f \u06cc\u0627 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f.\n"
+                          "(\u062f\u0631 \u06a9\u067e\u0634\u0646 \u0645\u06cc\u200c\u062a\u0648\u0627\u0646\u06cc\u062f \u0628\u0646\u0648\u06cc\u0633\u06cc\u062f: \u0627\u0633\u0645 \u0622\u0647\u0646\u06af | \u062e\u0648\u0627\u0646\u0646\u062f\u0647)\n"
+                          "\u0628\u0639\u062f \u0627\u0632 \u0630\u062e\u06cc\u0631\u0647\u060c \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc \u0622\u0647\u0646\u06af \u0631\u0627 \u0645\u06cc\u200c\u06af\u06cc\u0631\u06cc\u062f.")
         elif bid == "adm:upload":
             admin_state[sender] = {"mode": "await_song_upload"}
-            send(chat_id, "ðŸš€ Ø¢Ù‡Ù†Ú¯ Ø±Ø§ Ø¨ÙØ±Ø³ØªÛŒØ¯ ÛŒØ§ ÙÙˆØ±ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯.\n"
-                          "(Ø¯Ø± Ú©Ù¾Ø´Ù† Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒØ¯ Ø¨Ù†ÙˆÛŒØ³ÛŒØ¯: Ø§Ø³Ù… Ø¢Ù‡Ù†Ú¯ | Ø®ÙˆØ§Ù†Ù†Ø¯Ù‡)")
+            send(chat_id, "\U0001f680 \u0622\u0647\u0646\u06af \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f \u06cc\u0627 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f.\n"
+                          "(\u062f\u0631 \u06a9\u067e\u0634\u0646 \u0645\u06cc\u200c\u062a\u0648\u0627\u0646\u06cc\u062f \u0628\u0646\u0648\u06cc\u0633\u06cc\u062f: \u0627\u0633\u0645 \u0622\u0647\u0646\u06af | \u062e\u0648\u0627\u0646\u0646\u062f\u0647)")
         elif bid.startswith("adm:text:"):
             admin_state[sender] = {"mode": "await_text", "sid": bid[9:]}
-            send(chat_id, "âœï¸ Ù…ØªÙ† Ù¾Ø³Øª Ø±Ø§ Ø¨Ù†ÙˆÛŒØ³ÛŒØ¯ Ùˆ Ø¨ÙØ±Ø³ØªÛŒØ¯:")
+            send(chat_id, "\u270d\ufe0f \u0645\u062a\u0646 \u067e\u0633\u062a \u0631\u0627 \u0628\u0646\u0648\u06cc\u0633\u06cc\u062f \u0648 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f:")
         elif bid.startswith("adm:post:"):
             st = admin_state.get(sender) or {}
             sid = bid[9:]
             if st.get("mode") != "await_confirm" or str(st.get("sid")) != sid:
-                send(chat_id, "Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ù…Ù†Ù‚Ø¶ÛŒ Ø´Ø¯Ù‡. Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ø² Ù¾Ù†Ù„ Ø´Ø±ÙˆØ¹ Ú©Ù†ÛŒØ¯: /panel")
+                send(chat_id, "\u0627\u06cc\u0646 \u062f\u0631\u062e\u0648\u0627\u0633\u062a \u0645\u0646\u0642\u0636\u06cc \u0634\u062f\u0647. \u062f\u0648\u0628\u0627\u0631\u0647 \u0627\u0632 \u067e\u0646\u0644 \u0634\u0631\u0648\u0639 \u06a9\u0646\u06cc\u062f: /panel")
             elif not channels():
-                send(chat_id, "Ú©Ø§Ù†Ø§Ù„ÛŒ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡. Ø§ÙˆÙ„ Â«ðŸ“¢ Ø«Ø¨Øª Ú©Ø§Ù†Ø§Ù„Â» Ø±Ø§ Ø¨Ø²Ù†ÛŒØ¯.")
+                send(chat_id, "\u06a9\u0627\u0646\u0627\u0644\u06cc \u062b\u0628\u062a \u0646\u0634\u062f\u0647. \u0627\u0648\u0644 \xab\U0001f4e2 \u062b\u0628\u062a \u06a9\u0627\u0646\u0627\u0644\xbb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f.")
             else:
                 n = post_to_channels(sid, f"{st.get('text', '')}\n\n@{BOT_USERNAME}")
                 admin_state.pop(sender, None)
-                send(chat_id, f"âœ… Ù…Ù†ØªØ´Ø± Ø´Ø¯ Ø¯Ø± {n} Ú©Ø§Ù†Ø§Ù„." if n else "âŒ Ø§Ø±Ø³Ø§Ù„ Ø¨Ù‡ Ú©Ø§Ù†Ø§Ù„ Ø§Ù†Ø¬Ø§Ù… Ù†Ø´Ø¯. Ø±Ø¨Ø§Øª Ø¨Ø§ÛŒØ¯ Ø§Ø¯Ù…ÛŒÙ† Ú©Ø§Ù†Ø§Ù„ Ø¨Ø§Ø´Ø¯.")
+                send(chat_id, f"\u2705 \u0645\u0646\u062a\u0634\u0631 \u0634\u062f \u062f\u0631 {n} \u06a9\u0627\u0646\u0627\u0644." if n else "\u274c \u0627\u0631\u0633\u0627\u0644 \u0628\u0647 \u06a9\u0627\u0646\u0627\u0644 \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f. \u0631\u0628\u0627\u062a \u0628\u0627\u06cc\u062f \u0627\u062f\u0645\u06cc\u0646 \u06a9\u0627\u0646\u0627\u0644 \u0628\u0627\u0634\u062f.")
         elif bid == "adm:cancel":
             admin_state.pop(sender, None)
-            send(chat_id, "Ù„ØºÙˆ Ø´Ø¯. Ø¨Ø±Ø§ÛŒ Ù¾Ù†Ù„: /panel")
+            send(chat_id, "\u0644\u063a\u0648 \u0634\u062f. \u0628\u0631\u0627\u06cc \u067e\u0646\u0644: /panel")
         elif bid == "adm:addch":
-            send(chat_id, "ðŸ“¢ Ù„ÛŒÙ†Ú© ÛŒØ§ Ø¢ÛŒØ¯ÛŒ Ú©Ø§Ù†Ø§Ù„ Ø±Ø§ Ø¨ÙØ±Ø³ØªÛŒØ¯ (Ù…Ø«Ù„ @mychannel).\n"
-                          "Ø¨Ø¹Ø¯ ÛŒÚ© Ù¾Ø³Øª Ø§Ø² Ù‡Ù…Ø§Ù† Ú©Ø§Ù†Ø§Ù„ Ø±Ø§ Ø¨Ø±Ø§ÛŒ Ù…Ù† ÙÙˆØ±ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯.\n"
-                          "Ø±Ø¨Ø§Øª Ø¨Ø§ÛŒØ¯ Ø§Ø¯Ù…ÛŒÙ† Ú©Ø§Ù†Ø§Ù„ Ø¨Ø§Ø´Ø¯.")
+            send(chat_id, "\U0001f4e2 \u0644\u06cc\u0646\u06a9 \u06cc\u0627 \u0622\u06cc\u062f\u06cc \u06a9\u0627\u0646\u0627\u0644 \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f (\u0645\u062b\u0644 @mychannel).\n"
+                          "\u0628\u0639\u062f \u06cc\u06a9 \u067e\u0633\u062a \u0627\u0632 \u0647\u0645\u0627\u0646 \u06a9\u0627\u0646\u0627\u0644 \u0631\u0627 \u0628\u0631\u0627\u06cc \u0645\u0646 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f.\n"
+                          "\u0631\u0628\u0627\u062a \u0628\u0627\u06cc\u062f \u0627\u062f\u0645\u06cc\u0646 \u06a9\u0627\u0646\u0627\u0644 \u0628\u0627\u0634\u062f.")
         elif bid == "adm:stats":
             stats(chat_id)
         elif bid == "adm:channels":
-            send(chat_id, "\n".join(f"{g} | {l}" for g, l in channels()) or "Ú©Ø§Ù†Ø§Ù„ÛŒ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡.")
+            send(chat_id, "\n".join(f"{g} | {l}" for g, l in channels()) or "\u06a9\u0627\u0646\u0627\u0644\u06cc \u062b\u0628\u062a \u0646\u0634\u062f\u0647.")
         return
 
     if bid.startswith("joined:"):
@@ -300,12 +300,12 @@ def handle_button(inline, chat_id):
         if is_member(sender):
             send_song(chat_id, payload[5:])
         else:
-            send(chat_id, "Ù‡Ù†ÙˆØ² Ø¹Ø¶Ùˆ Ù†ÛŒØ³ØªÛŒØ¯ âŒ Ø§Ø¨ØªØ¯Ø§ Ø¯Ø± Ú©Ø§Ù†Ø§Ù„ Ø¹Ø¶Ùˆ Ø´ÙˆÛŒØ¯ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Â«ØªØ£ÛŒÛŒØ¯ Ø¹Ø¶ÙˆÛŒØªÂ» Ø±Ø§ Ø¨Ø²Ù†ÛŒØ¯.")
+            send(chat_id, "\u0647\u0646\u0648\u0632 \u0639\u0636\u0648 \u0646\u06cc\u0633\u062a\u06cc\u062f \u274c \u0627\u0628\u062a\u062f\u0627 \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644 \u0639\u0636\u0648 \u0634\u0648\u06cc\u062f \u0648 \u062f\u0648\u0628\u0627\u0631\u0647 \xab\u062a\u0623\u06cc\u06cc\u062f \u0639\u0636\u0648\u06cc\u062a\xbb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f.")
 
 
 def main():
     if not BOT_TOKEN:
-        raise SystemExit("BOT_TOKEN ØªÙ†Ø¸ÛŒÙ… Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.")
+        raise SystemExit("BOT_TOKEN \u062a\u0646\u0638\u06cc\u0645 \u0646\u0634\u062f\u0647 \u0627\u0633\u062a.")
     offset = None
     print("AHNG MUSIC bot started...")
     while True:
