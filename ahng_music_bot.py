@@ -43,10 +43,31 @@ def call(method, **data):
         return {}
 
 
+BTN_BY_CHAT = {}     # chat_id -> {متن دکمه: شناسه}
+GLOBAL_BTN = {}      # دکمه‌های ثابت پنل (بعد از ری‌استارت هم کار می‌کنند)
+
+
 def send(chat_id, text, keypad=None):
     d = {"chat_id": chat_id, "text": text}
     if keypad:
-        d["inline_keypad"] = keypad
+        btns = [b for r in keypad["rows"] for b in r["buttons"]]
+        if all(b.get("type") == "Simple" for b in btns):
+            m = BTN_BY_CHAT.setdefault(chat_id, {})
+            for b in btns:
+                t = b["button_text"].strip()
+                m[t] = b["id"]
+                if b["id"].startswith("adm:") and b["id"].count(":") < 2:
+                    GLOBAL_BTN[t] = b["id"]
+            if chat_id is None:
+                BTN_BY_CHAT.pop(None, None)
+                return {}
+            kp = dict(keypad)
+            kp["resize_keyboard"] = True
+            kp["on_time_keyboard"] = False
+            d["chat_keypad"] = kp
+            d["chat_keypad_type"] = "New"
+        else:
+            d["inline_keypad"] = keypad
     return call("sendMessage", **d)
 
 
@@ -79,10 +100,10 @@ def is_member(user_guid):
 
 
 def join_prompt(chat_id, payload):
-    rows = [[link_btn(f"ch{i}", f"\U0001f4e2 \u06a9\u0627\u0646\u0627\u0644 {i + 1}", link)] for i, (_, link) in enumerate(channels())]
-    rows.append([simple_btn(f"joined:{payload}", "\u2705 \u062a\u0623\u06cc\u06cc\u062f \u0639\u0636\u0648\u06cc\u062a")])
-    send(chat_id, "\u0628\u0631\u0627\u06cc \u062f\u0631\u06cc\u0627\u0641\u062a \u0622\u0647\u0646\u06af \u0627\u0628\u062a\u062f\u0627 \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644(\u0647\u0627\u06cc) \u0632\u06cc\u0631 \u0639\u0636\u0648 \u0634\u0648\u06cc\u062f\u060c \u0633\u067e\u0633 \xab\u062a\u0623\u06cc\u06cc\u062f \u0639\u0636\u0648\u06cc\u062a\xbb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f.",
-         keypad(rows))
+    rows = [[link_btn(f"ch{i}", f"\U0001f4e2 کانال {i + 1}", link)] for i, (_, link) in enumerate(channels())]
+    send(chat_id, "برای دریافت آهنگ ابتدا در کانال(های) زیر عضو شوید:", keypad(rows))
+    send(chat_id, "بعد از عضویت، دکمه‌ی «تأیید عضویت» را بزنید:",
+         keypad([[simple_btn(f"joined:{payload}", "✅ تأیید عضویت")]]))
 
 
 # ============ \u0622\u0647\u0646\u06af\u200c\u0647\u0627 ============
@@ -238,6 +259,11 @@ def handle_message(m, chat_id):
         print("BUTTON (message):", aux.get("button_id"), "from", sender)
         return handle_button({"aux_data": aux, "sender_id": sender}, chat_id)
 
+    bid = BTN_BY_CHAT.get(chat_id, {}).get(text) or GLOBAL_BTN.get(text)
+    if bid:
+        print("BUTTON (keyboard):", bid, "from", sender, flush=True)
+        return handle_button({"aux_data": {"button_id": bid}, "sender_id": sender}, chat_id)
+
     if text == "/myid":
         return send(chat_id, f"guid \u0634\u0645\u0627:\n{sender}")
 
@@ -322,7 +348,8 @@ def main():
     offset = None
     prev = None          # شمارش آپدیت‌های دور قبلِ (بدون offset)
     beat = 0
-    print("AHNG MUSIC bot started... VERSION 5 (log-everything)", flush=True)
+    print("AHNG MUSIC bot started... VERSION 6 (keyboard buttons)", flush=True)
+    admin_panel(None)      # فقط ثبت دکمه‌های ثابت پنل
     while True:
         # ---- الف) دکمه‌های شیشه‌ای: بدون offset گرفته می‌شوند، فقط موارد «تازه» اجرا می‌شوند ----
         d = {"limit": 50}
