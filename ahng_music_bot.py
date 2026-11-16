@@ -32,7 +32,7 @@ db.commit()
 
 
 # ============ API ============
-session = requests.Session()      # Ø§ØªØµØ§Ù„ Ø±Ø§ Ù†Ú¯Ù‡ Ù…ÛŒâ€ŒØ¯Ø§Ø±Ø¯ ØªØ§ Ù‡Ø± Ø¨Ø§Ø± Ø§Ø² Ø§ÙˆÙ„ ÙˆØµÙ„ Ù†Ø´ÙˆØ¯
+session = requests.Session()      # اتصال را نگه می‌دارد تا هر بار از اول وصل نشود
 
 
 def call(method, **data):
@@ -317,14 +317,14 @@ def ukey(u):
 
 def main():
     if not BOT_TOKEN:
-        raise SystemExit("BOT_TOKEN ØªÙ†Ø¸ÛŒÙ… Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.")
+        raise SystemExit("BOT_TOKEN تنظیم نشده است.")
     pool = ThreadPoolExecutor(2)
     offset = None
-    prev = None          # Ø´Ù…Ø§Ø±Ø´ Ø¢Ù¾Ø¯ÛŒØªâ€ŒÙ‡Ø§ÛŒ Ø¯ÙˆØ± Ù‚Ø¨Ù„Ù (Ø¨Ø¯ÙˆÙ† offset)
+    prev = None          # شمارش آپدیت‌های دور قبلِ (بدون offset)
     beat = 0
-    print("AHNG MUSIC bot started...", flush=True)
+    print("AHNG MUSIC bot started... VERSION 5 (log-everything)", flush=True)
     while True:
-        # ---- Ø§Ù„Ù) Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ: Ø¨Ø¯ÙˆÙ† offset Ú¯Ø±ÙØªÙ‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯ØŒ ÙÙ‚Ø· Ù…ÙˆØ§Ø±Ø¯ Â«ØªØ§Ø²Ù‡Â» Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯ ----
+        # ---- الف) دکمه‌های شیشه‌ای: بدون offset گرفته می‌شوند، فقط موارد «تازه» اجرا می‌شوند ----
         d = {"limit": 50}
         if offset:
             d["offset_id"] = offset
@@ -336,7 +336,7 @@ def main():
         ups = (r.get("data") or {}).get("updates", []) or []
         cur = Counter(ukey(u) for u in ups)
         if prev is not None:
-            fresh = cur - prev          # ÙÙ‚Ø· Ø¢Ù†Ú†Ù‡ Ø§Ø² Ø¯ÙˆØ± Ù‚Ø¨Ù„ Ø§Ø¶Ø§ÙÙ‡ Ø´Ø¯Ù‡
+            fresh = cur - prev          # فقط آنچه از دور قبل اضافه شده
             for u in ups:
                 k = ukey(u)
                 if fresh.get(k, 0) <= 0:
@@ -354,14 +354,17 @@ def main():
                     print("UPDATE:", str(u)[:300], flush=True)
         prev = cur
 
-        # ---- Ø¨) Ù¾ÛŒØ§Ù…â€ŒÙ‡Ø§ÛŒ Ø¹Ø§Ø¯ÛŒ: Ø¨Ø§ offset ----
+        # ---- ب) پیام‌های عادی: با offset ----
         r2 = fb.result()
         data = r2.get("data") or {}
         if data.get("next_offset_id"):
             offset = data["next_offset_id"]
         for u in data.get("updates", []) or []:
             if u.get("type") != "NewMessage":
+                if u.get("type") != "RemovedMessage":
+                    print("RAW(offset):", str(u)[:400], flush=True)
                 continue
+            print("MSG:", str(u.get("new_message"))[:300], flush=True)
             try:
                 handle_message(u["new_message"], u.get("chat_id"))
             except Exception as e:
