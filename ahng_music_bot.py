@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-AHNG MUSIC - Rubika Music Bot
-Rubika Bot API v3
+AHNG MUSIC - ربات موزیک روبیکا (Rubika Bot API v3)
 Python + requests + SQLite
 
-Run:
-BOT_TOKEN=xxxx python ahng_music_bot.py
+اجرا:  BOT_TOKEN=xxxx python ahng_music_bot.py
+
+نکته‌ی دکمه‌ها: کلیک دکمه‌ی شیشه‌ای ساده از راه getUpdates به ربات نمی‌رسد.
+برای همین همه‌ی دکمه‌ها از نوع «لینک» هستند و ربات را با ?start=کد باز می‌کنند؛
+ربات آن را مثل یک پیام /start عادی می‌خواند و کار دکمه را انجام می‌دهد.
+اگر دکمه‌ای کار نکرد، مدیر می‌تواند همان کار را با دستور متنی انجام دهد (/upload ...).
 """
 
 import os
@@ -14,1431 +17,522 @@ import time
 import sqlite3
 import logging
 import requests
-
 from urllib.parse import quote
 
-
 # =====================================================
-# CONFIG
+# تنظیمات
 # =====================================================
-
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-
-BOT_USERNAME = "ahng_music_bot"
-
+BOT_USERNAME = "ahng_music_bot"          # بدون @
 ADMINS = {
     x.strip()
-    for x in os.getenv(
-        "ADMINS",
-        "u0HbMCz07b206d47b6e01988bf7610cf"
-    ).split(",")
+    for x in os.getenv("ADMINS", "u0HbMCz07b206d47b6e01988bf7610cf").split(",")
     if x.strip()
 }
-
 DB_FILE = os.getenv("DB_FILE", "ahng.db")
-
 API = f"https://botapi.rubika.ir/v3/{BOT_TOKEN}/"
-
 POLL_INTERVAL = 0.4
-
 REQUEST_TIMEOUT = (5, 20)
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+log = logging.getLogger("AHNG")
 
 # =====================================================
-# LOGGING
+# ارتباط با API
 # =====================================================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
-
-log = logging.getLogger("AHNG_MUSIC")
-
-
-# =====================================================
-# HTTP SESSION
-# =====================================================
-
 session = requests.Session()
-
-session.headers.update({
-    "Content-Type": "application/json",
-    "User-Agent": "AHNG-MUSIC-BOT/1.0"
-})
 
 
 def call(method, **data):
-
     try:
-
-        response = session.post(
-            API + method,
-            json=data,
-            timeout=REQUEST_TIMEOUT
-        )
-
-        response.raise_for_status()
-
-        result = response.json()
-
+        r = session.post(API + method, json=data, timeout=REQUEST_TIMEOUT)
+        try:
+            result = r.json()
+        except ValueError:
+            log.error("API NON-JSON | %s | http=%s | %s", method, r.status_code, r.text[:200])
+            return {}
         if result.get("status") not in (None, "OK"):
-
-            log.error(
-                "API ERROR | %s | %s",
-                method,
-                result
-            )
-
+            log.error("API ERROR | %s | %s", method, str(result)[:300])
         return result
-
-    except Exception:
-
-        log.exception("REQUEST ERROR | %s", method)
-
+    except Exception as e:
+        log.error("REQUEST ERROR | %s | %s", method, e)
         return {}
 
 
+def detect_username():
+    """آیدی واقعی ربات را از خود روبیکا می‌گیرد تا لینک دکمه‌ها حتماً درست باشد."""
+    global BOT_USERNAME
+    res = call("getMe")
+    data = res.get("data") or {}
+    bot = data.get("bot") if isinstance(data.get("bot"), dict) else data
+    uname = str(bot.get("username") or "").lstrip("@").strip()
+    if uname and uname.lower() != BOT_USERNAME.lower():
+        log.warning("BOT_USERNAME در کد %s بود ولی ربات واقعی %s است؛ از واقعی استفاده می‌شود", BOT_USERNAME, uname)
+        BOT_USERNAME = uname
+    log.info("GETME | ok=%s | username=%s", bool(res), uname or "?")
+
+
+def ok(result):
+    return bool(result) and result.get("status", "OK") == "OK"
+
+
 # =====================================================
-# DATABASE
+# دیتابیس
 # =====================================================
-
-db = sqlite3.connect(
-    DB_FILE,
-    check_same_thread=False,
-    timeout=30
-)
-
-db.execute("PRAGMA journal_mode=WAL")
-
-db.execute("PRAGMA busy_timeout=30000")
-
+db = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
 db.executescript("""
-
 CREATE TABLE IF NOT EXISTS songs(
-
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    title TEXT,
-
-    artist TEXT,
-
-    file_id TEXT,
-
-    downloads INTEGER DEFAULT 0,
-
-    added_at INTEGER
-
-);
-
-CREATE TABLE IF NOT EXISTS users(
-
-    guid TEXT PRIMARY KEY,
-
-    joined_at INTEGER
-
-);
-
-CREATE TABLE IF NOT EXISTS channels(
-
-    guid TEXT PRIMARY KEY,
-
-    link TEXT
-
-);
-
+    title TEXT, artist TEXT, file_id TEXT,
+    downloads INTEGER DEFAULT 0, added_at INTEGER);
+CREATE TABLE IF NOT EXISTS users(guid TEXT PRIMARY KEY, joined_at INTEGER);
+CREATE TABLE IF NOT EXISTS channels(guid TEXT PRIMARY KEY, link TEXT);
 """)
-
 db.commit()
 
-
-def db_commit():
-    db.commit()
-
-
-# =====================================================
-# STATES
-# =====================================================
-
-admin_state = {}
-
-pending_channel_link = {}
+admin_state = {}            # guid ادمین -> مرحله‌ی فعلی
+pending_channel_link = {}   # guid ادمین -> لینک کانالی که منتظر فوروارد است
 
 
 # =====================================================
-# BUTTON SYSTEM
-# ALL BUTTONS ARE LINK BUTTONS
+# دکمه‌ها (همه لینک‌اند)
 # =====================================================
-
 def bot_link(payload):
-
-    return (
-        f"https://rubika.ir/{BOT_USERNAME}"
-        f"?start={quote(str(payload), safe='_')}"
-    )
+    return f"https://rubika.ir/{BOT_USERNAME}?start={quote(str(payload), safe='_')}"
 
 
-def link_button(button_id, text, url):
-
-    return {
-
-        "id": str(button_id),
-
-        "type": "Link",
-
-        "button_text": text,
-
-        "button_link": {
-
-            "type": "url",
-
-            "link_url": url
-
-        }
-
-    }
+def link_button(bid, text, url):
+    return {"id": str(bid), "type": "Link", "button_text": text,
+            "button_link": {"type": "url", "link_url": url}}
 
 
 def action_button(action, text):
-
-    return link_button(
-        action,
-        text,
-        bot_link(action)
-    )
-
-
-def channel_button(index, text, url):
-
-    return link_button(
-        f"channel_{index}",
-        text,
-        url
-    )
+    return link_button(action, text, bot_link(action))
 
 
 def keypad(rows):
-
-    return {
-
-        "rows": [
-
-            {"buttons": row}
-
-            for row in rows
-
-        ]
-
-    }
+    return {"rows": [{"buttons": row} for row in rows]}
 
 
 def send(chat_id, text, buttons=None):
-
     if not chat_id:
-
-        log.warning("SEND CANCELLED: chat_id is empty")
-
+        log.warning("SEND CANCELLED: chat_id خالی است")
         return {}
-
-    data = {
-
-        "chat_id": chat_id,
-
-        "text": str(text)
-
-    }
-
+    d = {"chat_id": chat_id, "text": str(text)}
     if buttons:
-
-        data["inline_keypad"] = buttons
-
-    result = call("sendMessage", **data)
-
-    log.info(
-        "SEND MESSAGE | chat=%s | status=%s",
-        chat_id,
-        result.get("status")
-    )
-
-    return result
+        d["inline_keypad"] = buttons
+    return call("sendMessage", **d)
 
 
 # =====================================================
-# CHANNELS
+# کانال‌ها و عضویت
 # =====================================================
-
 def channels():
-
-    return db.execute(
-        "SELECT guid, link FROM channels"
-    ).fetchall()
+    return db.execute("SELECT guid, link FROM channels").fetchall()
 
 
 def is_member(user_guid):
-
     if not user_guid:
-
         return False
-
-    for guid, link in channels():
-
-        result = call(
-            "getChatMember",
-            chat_id=guid,
-            user_id=user_guid
-        )
-
-        status = str(
-            (result.get("data") or {}).get("status", "")
-        ).lower()
-
-        log.info(
-            "MEMBERSHIP | user=%s | channel=%s | status=%s",
-            user_guid,
-            guid,
-            status
-        )
-
-        if status not in (
-            "member",
-            "creator",
-            "admin",
-            "owner"
-        ):
-
+    for guid, _ in channels():
+        res = call("getChatMember", chat_id=guid, user_id=user_guid)
+        status = str((res.get("data") or {}).get("status", "")).lower()
+        if status not in ("member", "creator", "admin", "owner"):
             return False
-
     return True
 
 
-# =====================================================
-# SONG LINKS
-# =====================================================
+def channel_list(chat_id):
+    items = channels()
+    if not items:
+        return send(chat_id, "📭 هنوز کانالی ثبت نشده است.")
+    text = "📋 کانال‌های ثبت‌شده:\n\n" + "\n".join(
+        f"{i}. {g}\n{l}" for i, (g, l) in enumerate(items, 1))
+    return send(chat_id, text)
 
+
+# =====================================================
+# آهنگ‌ها
+# =====================================================
 def song_link(song_id):
-
     return bot_link(f"song_{song_id}")
 
 
 def get_song(song_id):
+    return db.execute("SELECT title, artist, file_id FROM songs WHERE id=?", (song_id,)).fetchone()
 
-    return db.execute(
-        """
-        SELECT title, artist, file_id
-        FROM songs
-        WHERE id=?
-        """,
-        (song_id,)
-    ).fetchone()
-
-
-# =====================================================
-# SEND SONG
-# =====================================================
 
 def send_song(chat_id, song_id):
-
     song = get_song(song_id)
-
     if not song:
-
-        return send(
-            chat_id,
-            "❌ آهنگ موردنظر پیدا نشد."
-        )
-
+        return send(chat_id, "❌ آهنگ موردنظر پیدا نشد.")
     title, artist, file_id = song
+    res = call("sendFile", chat_id=chat_id, file_id=file_id,
+               text=f"🎵 {title}\n🎤 {artist}\n\n@{BOT_USERNAME}")
+    if ok(res):
+        db.execute("UPDATE songs SET downloads=downloads+1 WHERE id=?", (song_id,))
+        db.commit()
+        log.info("SONG SENT | song=%s | chat=%s", song_id, chat_id)
+    return res
 
-    result = call(
-        "sendFile",
-        chat_id=chat_id,
-        file_id=file_id,
-        text=(
-            f"🎵 {title}\n"
-            f"🎤 {artist}\n\n"
-            f"@{BOT_USERNAME}"
-        )
-    )
-
-    if result.get("status") == "OK":
-
-        db.execute(
-            """
-            UPDATE songs
-            SET downloads = downloads + 1
-            WHERE id=?
-            """,
-            (song_id,)
-        )
-
-        db_commit()
-
-        log.info(
-            "SONG SENT | song=%s | chat=%s",
-            song_id,
-            chat_id
-        )
-
-    return result
-
-
-# =====================================================
-# MEMBERSHIP PROMPT
-# =====================================================
 
 def join_prompt(chat_id, payload):
-
-    rows = []
-
-    for index, (guid, link) in enumerate(channels()):
-
-        rows.append([
-
-            channel_button(
-                index,
-                f"📢 کانال {index + 1}",
-                link
-            )
-
-        ])
-
-    rows.append([
-
-        action_button(
-            f"joined_{payload}",
-            "✅ تأیید عضویت"
-        )
-
-    ])
-
-    send(
-        chat_id,
-        "🔒 برای دریافت آهنگ ابتدا در کانال‌های زیر عضو شوید:",
-        keypad(rows)
-    )
+    rows = [[link_button(f"channel_{i}", f"📢 کانال {i + 1}", link)]
+            for i, (_, link) in enumerate(channels())]
+    rows.append([action_button(f"joined_{payload}", "✅ تأیید عضویت")])
+    send(chat_id, "🔒 برای دریافت آهنگ ابتدا در کانال‌های زیر عضو شوید، سپس «تأیید عضویت» را بزنید:",
+         keypad(rows))
 
 
 def deliver(chat_id, user_guid, payload):
-
     if not payload.startswith("song_"):
-
         return
-
     song_id = payload[5:]
-
-    if not song_id.isdigit():
-
-        return send(chat_id, "❌ لینک آهنگ معتبر نیست.")
-
-    if not get_song(song_id):
-
+    if not song_id.isdigit() or not get_song(song_id):
         return send(chat_id, "❌ آهنگ پیدا نشد.")
-
-    if channels():
-
-        if not is_member(user_guid):
-
-            return join_prompt(
-                chat_id,
-                payload
-            )
-
+    if channels() and not is_member(user_guid):
+        return join_prompt(chat_id, payload)
     return send_song(chat_id, song_id)
 
 
-# =====================================================
-# STATISTICS
-# =====================================================
+def save_song(message, sender):
+    f = message.get("file") or {}
+    file_id = f.get("file_id")
+    if not file_id:
+        return None
+    title = (f.get("file_name") or "آهنگ").rsplit(".", 1)[0]
+    artist = "-"
+    caption = (message.get("text") or "").strip()
+    if "|" in caption:
+        t, a = [x.strip() for x in caption.split("|", 1)]
+        title, artist = (t or title), (a or "-")
+    db.execute("INSERT INTO songs(title,artist,file_id,downloads,added_at) VALUES(?,?,?,0,?)",
+               (title, artist, file_id, int(time.time())))
+    db.commit()
+    song_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    log.info("SONG SAVED | id=%s | title=%s | by=%s", song_id, title, sender)
+    return song_id, title, artist
 
+
+def post_to_channels(song_id, caption):
+    song = get_song(song_id)
+    if not song:
+        return 0
+    file_id = song[2]
+    kp = keypad([[link_button(f"song_{song_id}", "🎧 دریافت آهنگ", song_link(song_id))]])
+    done = 0
+    for guid, _ in channels():
+        res = call("sendFile", chat_id=guid, file_id=file_id, text=caption, inline_keypad=kp)
+        if ok(res):
+            done += 1
+        log.info("PUBLISH | channel=%s | ok=%s", guid, ok(res))
+    return done
+
+
+# =====================================================
+# آمار
+# =====================================================
 def stats(chat_id):
-
-    users = db.execute(
-        "SELECT COUNT(*) FROM users"
-    ).fetchone()[0]
-
+    users = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     songs, downloads = db.execute(
-        """
-        SELECT
-            COUNT(*),
-            COALESCE(SUM(downloads), 0)
-        FROM songs
-        """
-    ).fetchone()
-
+        "SELECT COUNT(*), COALESCE(SUM(downloads),0) FROM songs").fetchone()
     best = db.execute(
-        """
-        SELECT id, title, downloads
-        FROM songs
-        ORDER BY downloads DESC
-        LIMIT 10
-        """
-    ).fetchall()
-
-    text = (
-        "📊 آمار AHNG MUSIC\n\n"
-        f"👤 کاربران: {users}\n"
-        f"🎵 آهنگ‌ها: {songs}\n"
-        f"⬇️ دانلودها: {downloads}\n\n"
-        "🏆 ۱۰ آهنگ پردانلود:\n\n"
-    )
-
-    if best:
-
-        text += "\n".join(
-
-            f"{i}. {title} | {count} دانلود"
-
-            for i, (song_id, title, count)
-            in enumerate(best, 1)
-
-        )
-
-    else:
-
-        text += "هنوز آهنگی ثبت نشده است."
-
+        "SELECT title, downloads FROM songs ORDER BY downloads DESC LIMIT 10").fetchall()
+    text = (f"📊 آمار AHNG MUSIC\n\n👤 کاربران: {users}\n🎵 آهنگ‌ها: {songs}\n"
+            f"⬇️ دانلودها: {downloads}\n\n🏆 ۱۰ آهنگ پردانلود:\n\n")
+    text += ("\n".join(f"{i}. {t} | {c} دانلود" for i, (t, c) in enumerate(best, 1))
+             if best else "هنوز آهنگی ثبت نشده است.")
     return send(chat_id, text)
 
 
 # =====================================================
-# CHANNEL LIST
+# پنل مدیر
 # =====================================================
-
-def channel_list(chat_id):
-
-    items = channels()
-
-    if not items:
-
-        return send(
-            chat_id,
-            "📭 هنوز کانالی ثبت نشده است."
-        )
-
-    text = "📋 کانال‌های ثبت‌شده:\n\n"
-
-    text += "\n".join(
-
-        f"{i}. {guid}\n{link}"
-
-        for i, (guid, link) in enumerate(items, 1)
-
-    )
-
-    return send(chat_id, text)
-
-
-# =====================================================
-# ADMIN
-# =====================================================
-
 def is_admin(guid):
-
     return guid in ADMINS
 
 
 def admin_panel(chat_id):
-
     rows = [
-
-        [
-            action_button(
-                "adm_add",
-                "➕ افزودن آهنگ"
-            ),
-
-            action_button(
-                "adm_upload",
-                "🚀 آپلود و انتشار"
-            )
-        ],
-
-        [
-            action_button(
-                "adm_addch",
-                "📢 ثبت کانال"
-            ),
-
-            action_button(
-                "adm_stats",
-                "📊 آمار"
-            )
-        ],
-
-        [
-            action_button(
-                "adm_channels",
-                "📋 کانال‌ها"
-            )
-        ]
-
+        [action_button("adm_add", "➕ افزودن آهنگ"), action_button("adm_upload", "🚀 آپلود و انتشار")],
+        [action_button("adm_addch", "📢 ثبت کانال"), action_button("adm_stats", "📊 آمار")],
+        [action_button("adm_channels", "📋 کانال‌ها")],
     ]
-
-    return send(
-        chat_id,
-        "🛠 پنل مدیریت AHNG MUSIC\n\n"
-        "یکی از گزینه‌های زیر را انتخاب کنید:",
-        keypad(rows)
-    )
-
-
-# =====================================================
-# SAVE SONG
-# =====================================================
-
-def save_song(message, sender):
-
-    file = message.get("file") or {}
-
-    file_id = file.get("file_id")
-
-    if not file_id:
-
-        return None
-
-    filename = (
-        file.get("file_name")
-        or "آهنگ"
-    )
-
-    filename = filename.rsplit(".", 1)[0]
-
-    title = filename
-
-    artist = "-"
-
-    caption = (message.get("text") or "").strip()
-
-    if "|" in caption:
-
-        title, artist = [
-            x.strip()
-            for x in caption.split("|", 1)
-        ]
-
-    db.execute(
-        """
-        INSERT INTO songs
-        (title, artist, file_id, downloads, added_at)
-        VALUES (?, ?, ?, 0, ?)
-        """,
-        (
-            title,
-            artist,
-            file_id,
-            int(time.time())
-        )
-    )
-
-    db_commit()
-
-    song_id = db.execute(
-        "SELECT last_insert_rowid()"
-    ).fetchone()[0]
-
-    log.info(
-        "SONG SAVED | id=%s | title=%s | sender=%s",
-        song_id,
-        title,
-        sender
-    )
-
-    return song_id, title, artist
-
-
-# =====================================================
-# PUBLISH SONG
-# =====================================================
-
-def post_to_channels(song_id, caption):
-
-    song = get_song(song_id)
-
-    if not song:
-
-        return 0
-
-    title, artist, file_id = song
-
-    buttons = keypad([
-
-        [
-
-            link_button(
-                f"song_{song_id}",
-                "🎧 دریافت آهنگ",
-                song_link(song_id)
-            )
-
-        ]
-
-    ])
-
-    success = 0
-
-    for guid, link in channels():
-
-        result = call(
-            "sendFile",
-            chat_id=guid,
-            file_id=file_id,
-            text=caption,
-            inline_keypad=buttons
-        )
-
-        if result.get("status") == "OK":
-
-            success += 1
-
-        log.info(
-            "PUBLISH | channel=%s | result=%s",
-            guid,
-            result
-        )
-
-    return success
-
-
-# =====================================================
-# ADMIN TEXT HANDLER
-# =====================================================
-
-def handle_admin(message, chat_id, sender, text):
-
-    file = message.get("file")
-
-    forwarded = message.get("forwarded_from") or {}
-
-    state = admin_state.get(sender) or {}
-
-    mode = state.get("mode")
-
-    # -------------------------------------------------
-    # RECEIVE SONG
-    # -------------------------------------------------
-
-    if file:
-
-        saved = save_song(message, sender)
-
-        if not saved:
-
-            return send(
-                chat_id,
-                "❌ فایل آهنگ شناسایی نشد."
-            )
-
-        song_id, title, artist = saved
-
-        if mode == "await_upload":
-
-            admin_state[sender] = {
-
-                "mode": "await_post_text",
-
-                "sid": song_id
-
-            }
-
-            return send(
-                chat_id,
-                f"✅ آهنگ ذخیره شد:\n"
-                f"{title} - {artist}\n\n"
-                "✍️ حالا متن پست را ارسال کنید:"
-            )
-
-        admin_state.pop(sender, None)
-
-        return send(
-            chat_id,
-            f"✅ آهنگ ذخیره شد:\n"
-            f"{title} - {artist}\n\n"
-            f"🔗 لینک اختصاصی:\n{song_link(song_id)}"
-        )
-
-    # -------------------------------------------------
-    # ADD CHANNEL FORWARD
-    # -------------------------------------------------
-
-    if forwarded and sender in pending_channel_link:
-
-        guid = forwarded.get("from_chat_id")
-
-        if not guid:
-
-            return send(
-                chat_id,
-                "❌ شناسه کانال از پیام فورواردشده دریافت نشد."
-            )
-
-        link = pending_channel_link.pop(sender)
-
-        db.execute(
-            """
-            INSERT OR REPLACE INTO channels
-            (guid, link)
-            VALUES (?, ?)
-            """,
-            (guid, link)
-        )
-
-        db_commit()
-
-        log.info(
-            "CHANNEL SAVED | guid=%s | link=%s",
-            guid,
-            link
-        )
-
-        return send(
-            chat_id,
-            "✅ کانال ثبت شد.\n\n"
-            "مطمئن شوید ربات در کانال دسترسی ادمین دارد."
-        )
-
-    # -------------------------------------------------
-    # POST TEXT
-    # -------------------------------------------------
-
-    if mode == "await_post_text" and text:
-
-        if text.startswith("/"):
-
+    return send(chat_id,
+                "🛠 پنل مدیریت AHNG MUSIC\nیکی از گزینه‌ها را انتخاب کنید:\n\n"
+                "(اگر دکمه‌ها کار نکردند: /add  /upload  /addch  /stats  /channels  /cancel)",
+                keypad(rows))
+
+
+def handle_action(action, chat_id, sender):
+    """کار هر دکمه (چه از لینک دکمه، چه از دستور متنی)."""
+    log.info("BUTTON | action=%s | sender=%s", action, sender)
+
+    if action.startswith("adm_"):
+        if not is_admin(sender):
+            log.warning("IGNORED admin action from non-admin: %s", sender)
             return
 
-        admin_state[sender] = {
+        if action == "adm_add":
+            admin_state[sender] = {"mode": "await_add"}
+            return send(chat_id, "➕ آهنگ را ارسال یا فوروارد کنید.\n"
+                                 "(در کپشن می‌توانید بنویسید: اسم آهنگ | خواننده)")
+        if action == "adm_upload":
+            admin_state[sender] = {"mode": "await_upload"}
+            return send(chat_id, "🚀 آهنگ را ارسال یا فوروارد کنید.\n"
+                                 "(در کپشن می‌توانید بنویسید: اسم آهنگ | خواننده)")
+        if action == "adm_stats":
+            return stats(chat_id)
+        if action == "adm_channels":
+            return channel_list(chat_id)
+        if action == "adm_addch":
+            admin_state[sender] = {"mode": "await_channel"}
+            return send(chat_id, "📢 لینک یا آیدی کانال را بفرستید (مثل @mychannel).\n"
+                                 "بعد یک پست از همان کانال برای من فوروارد کنید.\n"
+                                 "ربات باید ادمین کانال باشد.")
+        if action == "adm_cancel":
+            admin_state.pop(sender, None)
+            pending_channel_link.pop(sender, None)
+            return send(chat_id, "❌ لغو شد. برای پنل: /panel")
+        if action.startswith("adm_post_"):
+            song_id = action[len("adm_post_"):]
+            st = admin_state.get(sender) or {}
+            if st.get("mode") != "await_confirm" or str(st.get("sid")) != song_id:
+                return send(chat_id, "❌ این درخواست منقضی شده. دوباره از پنل شروع کنید: /panel")
+            if not channels():
+                return send(chat_id, "❌ کانالی ثبت نشده. اول «ثبت کانال» را بزنید.")
+            n = post_to_channels(song_id, f"{st.get('text', '')}\n\n@{BOT_USERNAME}")
+            admin_state.pop(sender, None)
+            if n:
+                return send(chat_id, f"✅ در {n} کانال منتشر شد.")
+            return send(chat_id, "❌ انتشار انجام نشد. ربات باید ادمین کانال باشد.")
+        return
 
-            "mode": "await_song_link",
+    if action.startswith("joined_song_"):
+        song_id = action[len("joined_song_"):]
+        if not song_id.isdigit():
+            return
+        if is_member(sender):
+            return send_song(chat_id, song_id)
+        return send(chat_id, "❌ هنوز عضو همه‌ی کانال‌ها نیستید. عضو شوید و دوباره «تأیید عضویت» را بزنید.")
 
-            "sid": state["sid"],
 
-            "text": text
+COMMAND_ACTIONS = {"/add": "adm_add", "/upload": "adm_upload", "/addch": "adm_addch",
+                   "/stats": "adm_stats", "/channels": "adm_channels", "/cancel": "adm_cancel"}
 
-        }
 
-        return send(
-            chat_id,
-            "✅ متن پست ذخیره شد.\n\n"
-            "🔗 حالا لینک اختصاصی همین آهنگ را ارسال کنید:\n\n"
-            + song_link(state["sid"])
-        )
+def handle_admin(message, chat_id, sender, text):
+    """پیام‌های مدیر. اگر چیزی را پردازش کرد، نتیجه‌ی غیر None برمی‌گرداند."""
+    f = message.get("file")
+    fwd = message.get("forwarded_from") or {}
+    st = admin_state.get(sender) or {}
+    mode = st.get("mode")
 
-    # -------------------------------------------------
-    # VERIFY SONG LINK
-    # -------------------------------------------------
+    # ۱) دریافت فایل آهنگ
+    if f:
+        saved = save_song(message, sender)
+        if not saved:
+            return send(chat_id, "❌ فایل آهنگ شناسایی نشد.")
+        sid, title, artist = saved
+        if mode == "await_upload":
+            admin_state[sender] = {"mode": "await_post_text", "sid": sid}
+            return send(chat_id, f"✅ ذخیره شد: {title} - {artist}\n\n✍️ حالا متن پست را بفرستید:")
+        admin_state.pop(sender, None)
+        return send(chat_id, f"✅ ذخیره شد: {title} - {artist}\n\n🔗 لینک اختصاصی:\n{song_link(sid)}")
+
+    # ۲) فوروارد پست کانال برای ثبت کانال
+    if fwd and sender in pending_channel_link:
+        guid = fwd.get("from_chat_id")
+        if not guid:
+            return send(chat_id, "❌ شناسه‌ی کانال از پیام فورواردشده گرفته نشد.")
+        link = pending_channel_link.pop(sender)
+        db.execute("INSERT OR REPLACE INTO channels(guid, link) VALUES(?,?)", (guid, link))
+        db.commit()
+        log.info("CHANNEL SAVED | %s", guid)
+        return send(chat_id, "✅ کانال ثبت شد. یادتان باشد ربات در کانال ادمین باشد.")
+
+    # ۳) دستورها (/start و ناشناخته‌ها را رد می‌کند تا ادامه پیدا کنند)
+    if text.startswith("/"):
+        cmd = text.split()[0].lower()
+        if cmd in COMMAND_ACTIONS:
+            return handle_action(COMMAND_ACTIONS[cmd], chat_id, sender)
+        if text.startswith("/delchannel "):
+            db.execute("DELETE FROM channels WHERE guid=?", (text.split(maxsplit=1)[1].strip(),))
+            db.commit()
+            return send(chat_id, "✅ کانال حذف شد.")
+        if text.startswith("/del "):
+            sid = text.split(maxsplit=1)[1].strip()
+            if not sid.isdigit():
+                return send(chat_id, "❌ شناسه‌ی آهنگ معتبر نیست.")
+            db.execute("DELETE FROM songs WHERE id=?", (sid,))
+            db.commit()
+            return send(chat_id, "✅ آهنگ حذف شد.")
+        return None
+
+    # ۴) مرحله‌های متنی
+    if mode == "await_post_text" and text:
+        admin_state[sender] = {"mode": "await_song_link", "sid": st["sid"], "text": text}
+        return send(chat_id, "✅ متن ثبت شد.\n🔗 حالا لینک اختصاصی همین آهنگ را بفرستید:\n\n" + song_link(st["sid"]))
 
     if mode == "await_song_link" and text:
-
-        match = re.search(
-            r"song_(\d+)",
-            text
-        )
-
-        if not match or match.group(1) != str(state["sid"]):
-
-            return send(
-                chat_id,
-                "❌ لینک اشتباه است.\n"
-                "لینک همین آهنگ را ارسال کنید."
-            )
-
-        state["mode"] = "await_confirm"
-
-        admin_state[sender] = state
-
-        buttons = keypad([
-
-            [
-
-                action_button(
-                    f"adm_post_{state['sid']}",
-                    "✅ تأیید نهایی"
-                ),
-
-                action_button(
-                    "adm_cancel",
-                    "❌ لغو"
-                )
-
-            ]
-
-        ])
-
-        return send(
-            chat_id,
-            "📋 پیش‌نمایش پست:\n\n"
-            f"{state['text']}\n\n"
-            f"@{BOT_USERNAME}\n\n"
-            "آیا انتشار را تأیید می‌کنید؟",
-            buttons
-        )
-
-    # -------------------------------------------------
-    # ADD CHANNEL
-    # -------------------------------------------------
+        m = re.search(r"song_(\d+)", text)
+        if not m or m.group(1) != str(st["sid"]):
+            return send(chat_id, "❌ لینک درست نیست. لینک همین آهنگ را بفرستید:\n" + song_link(st["sid"]))
+        st["mode"] = "await_confirm"
+        admin_state[sender] = st
+        kp = keypad([[action_button(f"adm_post_{st['sid']}", "✅ تأیید نهایی"),
+                      action_button("adm_cancel", "❌ لغو")]])
+        return send(chat_id, f"📋 پیش‌نمایش پست:\n\n{st['text']}\n\n@{BOT_USERNAME}\n\nمنتشر شود؟", kp)
 
     if mode == "await_channel" and text:
-
         first = text.split()[0]
-
-        if first.startswith("@"):
-
+        if first.startswith("@") and len(first) > 2:
             link = "https://rubika.ir/" + first[1:]
-
-        elif (
-            "rubika.ir/" in first
-            or "rubika.me/" in first
-        ):
-
+        elif "rubika.ir/" in first or "rubika.me/" in first:
             link = first
-
         else:
-
-            return send(
-                chat_id,
-                "❌ لینک یا آیدی کانال معتبر نیست."
-            )
-
+            return send(chat_id, "❌ لینک یا آیدی کانال معتبر نیست.")
         pending_channel_link[sender] = link
-
         admin_state.pop(sender, None)
-
-        return send(
-            chat_id,
-            "✅ لینک دریافت شد.\n\n"
-            "حالا یک پست از همان کانال برای ربات فوروارد کنید.\n\n"
-            "ربات باید در کانال ادمین باشد."
-        )
-
-    # -------------------------------------------------
-    # COMMANDS
-    # -------------------------------------------------
-
-    if text == "/stats":
-
-        return stats(chat_id)
-
-    if text == "/channels":
-
-        return channel_list(chat_id)
-
-    if text.startswith("/delchannel "):
-
-        guid = text.split(maxsplit=1)[1].strip()
-
-        db.execute(
-            "DELETE FROM channels WHERE guid=?",
-            (guid,)
-        )
-
-        db_commit()
-
-        return send(chat_id, "✅ کانال حذف شد.")
-
-    if text.startswith("/del "):
-
-        song_id = text.split(maxsplit=1)[1].strip()
-
-        if not song_id.isdigit():
-
-            return send(chat_id, "❌ شناسه آهنگ معتبر نیست.")
-
-        db.execute(
-            "DELETE FROM songs WHERE id=?",
-            (song_id,)
-        )
-
-        db_commit()
-
-        return send(chat_id, "✅ آهنگ حذف شد.")
+        return send(chat_id, "✅ لینک دریافت شد. حالا یک پست از همان کانال برای من فوروارد کنید.")
 
     return None
 
 
 # =====================================================
-# BUTTON ACTIONS
+# پیام‌ها
 # =====================================================
-
-def handle_action(action, chat_id, sender):
-
-    log.info(
-        "BUTTON RECEIVED | action=%s | sender=%s",
-        action,
-        sender
-    )
-
-    # -------------------------------------------------
-    # ADMIN ACTIONS
-    # -------------------------------------------------
-
-    if action.startswith("adm_"):
-
-        if not is_admin(sender):
-
-            log.warning(
-                "UNAUTHORIZED BUTTON | sender=%s | action=%s",
-                sender,
-                action
-            )
-
-            return
-
-        if action == "adm_add":
-
-            admin_state[sender] = {
-                "mode": "await_add"
-            }
-
-            return send(
-                chat_id,
-                "➕ آهنگ را ارسال یا فوروارد کنید.\n\n"
-                "برای تعیین نام و خواننده در کپشن بنویسید:\n"
-                "اسم آهنگ | خواننده"
-            )
-
-        if action == "adm_upload":
-
-            admin_state[sender] = {
-                "mode": "await_upload"
-            }
-
-            return send(
-                chat_id,
-                "🚀 آهنگ موردنظر را ارسال یا فوروارد کنید."
-            )
-
-        if action == "adm_stats":
-
-            return stats(chat_id)
-
-        if action == "adm_channels":
-
-            return channel_list(chat_id)
-
-        if action == "adm_addch":
-
-            admin_state[sender] = {
-                "mode": "await_channel"
-            }
-
-            return send(
-                chat_id,
-                "📢 لینک یا آیدی کانال را ارسال کنید.\n\n"
-                "مثال:\n"
-                "@mychannel"
-            )
-
-        if action == "adm_cancel":
-
-            admin_state.pop(sender, None)
-
-            return send(
-                chat_id,
-                "❌ عملیات لغو شد."
-            )
-
-        if action.startswith("adm_post_"):
-
-            song_id = action[len("adm_post_"):]
-
-            state = admin_state.get(sender) or {}
-
-            if (
-                state.get("mode") != "await_confirm"
-                or str(state.get("sid")) != song_id
-            ):
-
-                return send(
-                    chat_id,
-                    "❌ درخواست منقضی شده است.\n"
-                    "دوباره از پنل شروع کنید."
-                )
-
-            if not channels():
-
-                return send(
-                    chat_id,
-                    "❌ هیچ کانالی ثبت نشده است."
-                )
-
-            count = post_to_channels(
-                song_id,
-                state.get("text", "") + f"\n\n@{BOT_USERNAME}"
-            )
-
-            admin_state.pop(sender, None)
-
-            return send(
-                chat_id,
-                f"📢 نتیجه انتشار:\n\n"
-                f"✅ انتشار موفق در {count} کانال."
-                if count
-                else
-                "❌ انتشار در هیچ کانالی موفق نبود."
-            )
-
-        return
-
-    # -------------------------------------------------
-    # JOIN CONFIRMATION
-    # -------------------------------------------------
-
-    if action.startswith("joined_song_"):
-
-        payload = action[len("joined_"):]
-
-        song_id = payload[5:]
-
-        if not song_id.isdigit():
-
-            return
-
-        if is_member(sender):
-
-            return send_song(
-                chat_id,
-                song_id
-            )
-
-        return send(
-            chat_id,
-            "❌ هنوز عضو تمام کانال‌ها نشده‌اید.\n\n"
-            "ابتدا عضو شوید و دوباره تأیید کنید."
-        )
-
-
-# =====================================================
-# START PAYLOAD
-# =====================================================
-
 def process_start(chat_id, sender, payload):
-
-    log.info(
-        "START | sender=%s | payload=%s",
-        sender,
-        payload
-    )
-
+    log.info("START | sender=%s | payload=%s", sender, payload)
     if payload.startswith("song_"):
-
-        return deliver(
-            chat_id,
-            sender,
-            payload
-        )
-
-    if payload.startswith("adm_"):
-
-        return handle_action(
-            payload,
-            chat_id,
-            sender
-        )
-
-    if payload.startswith("joined_song_"):
-
-        return handle_action(
-            payload,
-            chat_id,
-            sender
-        )
-
-    if payload == "":
-
+        return deliver(chat_id, sender, payload)
+    if payload.startswith(("adm_", "joined_song_")):
+        return handle_action(payload, chat_id, sender)
+    if not payload:
         if is_admin(sender):
-
             return admin_panel(chat_id)
+        return send(chat_id, "سلام 👋 به AHNG MUSIC خوش آمدید.\n"
+                             "برای دریافت آهنگ از دکمه‌ی دانلود زیر پست‌های کانال استفاده کنید.")
 
-        return send(
-            chat_id,
-            "سلام 👋 به AHNG MUSIC خوش آمدید.\n\n"
-            "🎵 برای دریافت آهنگ از لینک اختصاصی آهنگ‌ها استفاده کنید."
-        )
-
-
-# =====================================================
-# MESSAGE HANDLER
-# =====================================================
 
 def handle_message(message, chat_id):
-
     if not isinstance(message, dict):
-
         return
-
     sender = message.get("sender_id", chat_id)
-
-    text = (
-        message.get("text") or ""
-    ).strip()
-
+    text = (message.get("text") or "").strip()
+    aux = message.get("aux_data") or {}
     if not sender:
-
         return
+    if chat_id in ADMINS:            # اگر guid چت را در ADMINS گذاشته باشند
+        sender = chat_id
 
-    # SAVE USER
-
-    db.execute(
-        """
-        INSERT OR IGNORE INTO users
-        (guid, joined_at)
-        VALUES (?, ?)
-        """,
-        (sender, int(time.time()))
-    )
-
-    db_commit()
-
-    log.info(
-        "MESSAGE | sender=%s | text=%s",
-        sender,
-        text[:200]
-    )
-
-    # MY ID - AVAILABLE TO EVERYONE
+    db.execute("INSERT OR IGNORE INTO users(guid, joined_at) VALUES(?,?)", (sender, int(time.time())))
+    db.commit()
+    log.info("MESSAGE | sender=%s | text=%s", sender, text[:100])
 
     if text == "/myid":
+        return send(chat_id, f"🆔 شناسه‌ی شما:\n{sender}\n\n💬 شناسه‌ی چت:\n{chat_id}")
+    if text == "/ping":
+        return send(chat_id, "pong ✅ ربات روشن است.")
 
-        return send(
-            chat_id,
-            f"🆔 شناسه شما:\n{sender}"
-        )
+    # اگر روبیکا شناسه‌ی دکمه را در aux_data بفرستد
+    if aux.get("button_id"):
+        return handle_action(aux["button_id"], chat_id, sender)
 
-    # ADMIN MESSAGES
-
-    if is_admin(sender):
-
-        result = handle_admin(
-            message,
-            chat_id,
-            sender,
-            text
-        )
-
-        if result is not None:
-
-            return result
-
-    # START
-
-    if text.startswith("/start"):
-
-        parts = text.split(maxsplit=1)
-
-        payload = (
-            parts[1].strip()
-            if len(parts) > 1
-            else ""
-        )
-
-        return process_start(
-            chat_id,
-            sender,
-            payload
-        )
-
-    # ADMIN PANEL
+    if is_admin(sender) and handle_admin(message, chat_id, sender, text) is not None:
+        return
 
     if text == "/panel":
+        return admin_panel(chat_id) if is_admin(sender) else None
 
-        if is_admin(sender):
+    if text.startswith("/start") or aux.get("start_id"):
+        parts = text.split(maxsplit=1)
+        # کد start یا داخل متن است یا داخل aux_data.start_id
+        payload = parts[1].strip() if text.startswith("/start") and len(parts) > 1 else (aux.get("start_id") or "")
+        return process_start(chat_id, sender, payload)
 
-            return admin_panel(chat_id)
 
+def process_update(u):
+    if not isinstance(u, dict):
         return
-
-    # ADMIN COMMANDS
-
-    if is_admin(sender):
-
-        if text.startswith(("/stats", "/channels", "/del ", "/delchannel ")):
-
-            return handle_admin(
-                message,
-                chat_id,
-                sender,
-                text
-            )
-
-
-# =====================================================
-# UPDATE PROCESSOR
-# =====================================================
-
-def process_update(update):
-
-    if not isinstance(update, dict):
-
+    t = u.get("type")
+    if t == "RemovedMessage":
         return
-
-    update_type = update.get("type")
-
-    chat_id = update.get("chat_id")
-
-    if update_type == "RemovedMessage":
-
-        return
-
-    if update_type == "NewMessage":
-
-        message = update.get("new_message") or {}
-
+    if t == "NewMessage":
         try:
-
-            handle_message(
-                message,
-                chat_id
-            )
-
+            handle_message(u.get("new_message") or {}, u.get("chat_id"))
         except Exception:
-
-            log.exception(
-                "MESSAGE HANDLER ERROR"
-            )
-
+            log.exception("MESSAGE HANDLER ERROR")
         return
-
-    # Other update types
-
-    if update.get("inline_message"):
-
-        log.info(
-            "INLINE UPDATE RECEIVED: %s",
-            update["inline_message"]
-        )
-
-        inline = update["inline_message"]
-
-        sender = inline.get("sender_id")
-
-        if sender and inline.get("aux_data"):
-
-            action = (
-                inline["aux_data"].get("button_id")
-            )
-
-            if action:
-
-                handle_action(
-                    action,
-                    inline.get("chat_id") or chat_id,
-                    sender
-                )
-
+    if u.get("inline_message"):      # اگر روبیکا کلیک دکمه‌ی ساده را هم فرستاد
+        im = u["inline_message"]
+        bid = (im.get("aux_data") or {}).get("button_id")
+        log.info("INLINE UPDATE | %s", str(im)[:200])
+        if bid:
+            try:
+                handle_action(bid, im.get("chat_id") or u.get("chat_id"), im.get("sender_id"))
+            except Exception:
+                log.exception("INLINE HANDLER ERROR")
         return
-
-    log.info(
-        "OTHER UPDATE: %s",
-        update
-    )
+    log.info("OTHER UPDATE | %s", str(u)[:300])
 
 
 # =====================================================
-# MAIN POLLING
+# حلقه‌ی اصلی
 # =====================================================
+def skip_backlog():
+    """پیام‌های قدیمیِ زمان خاموش بودن را رد می‌کند تا ربات دوباره جوابشان را ندهد."""
+    offset, skipped = None, 0
+    for _ in range(20):
+        d = {"limit": 100}
+        if offset:
+            d["offset_id"] = offset
+        data = (call("getUpdates", **d).get("data") or {})
+        ups = data.get("updates") or []
+        skipped += len(ups)
+        nxt = data.get("next_offset_id")
+        if nxt:
+            offset = nxt
+        if len(ups) < 100:
+            break
+    log.info("SKIPPED %s old updates", skipped)
+    return offset
+
 
 def main():
-
     if not BOT_TOKEN:
-
-        raise SystemExit(
-            "BOT_TOKEN تنظیم نشده است."
-        )
-
-    offset = None
-
-    log.info(
-        "AHNG MUSIC STARTED | BOT=%s",
-        BOT_USERNAME
-    )
-
-    log.info(
-        "ADMINS=%s",
-        len(ADMINS)
-    )
-
+        raise SystemExit("BOT_TOKEN تنظیم نشده است.")
+    log.info("AHNG MUSIC STARTED | bot=@%s | admins=%s", BOT_USERNAME, len(ADMINS))
+    detect_username()
+    offset = skip_backlog()
+    if os.getenv("NOTIFY_ADMINS", "1") == "1":
+        for a in ADMINS:
+            r = send(a, "✅ ربات روشن شد.")
+            log.info("STARTUP NOTICE | admin=%s | ok=%s", a, ok(r))
+            if ok(r):
+                admin_panel(a)
     while True:
-
         try:
-
-            params = {
-                "limit": 100
-            }
-
+            d = {"limit": 100}
             if offset:
-
-                params["offset_id"] = offset
-
-            result = call(
-                "getUpdates",
-                **params
-            )
-
-            if not result:
-
+                d["offset_id"] = offset
+            res = call("getUpdates", **d)
+            if not res or res.get("status") not in (None, "OK"):
                 time.sleep(2)
-
                 continue
-
-            if result.get("status") not in (None, "OK"):
-
-                log.error(
-                    "POLLING ERROR: %s",
-                    result
-                )
-
-                time.sleep(3)
-
-                continue
-
-            data = result.get("data") or {}
-
-            updates = data.get("updates") or []
-
-            log.info(
-                "UPDATES RECEIVED: %s",
-                len(updates)
-            )
-
-            for update in updates:
-
-                try:
-
-                    process_update(update)
-
-                except Exception:
-
-                    log.exception(
-                        "UPDATE PROCESSING ERROR"
-                    )
-
-            next_offset = data.get("next_offset_id")
-
-            if next_offset:
-
-                offset = next_offset
-
+            data = res.get("data") or {}
+            for u in data.get("updates") or []:
+                process_update(u)
+            if data.get("next_offset_id"):
+                offset = data["next_offset_id"]
             time.sleep(POLL_INTERVAL)
-
         except KeyboardInterrupt:
-
             log.info("BOT STOPPED")
-
             break
-
         except Exception:
-
-            log.exception(
-                "MAIN LOOP ERROR"
-            )
-
+            log.exception("MAIN LOOP ERROR")
             time.sleep(3)
 
 
-# =====================================================
-# RUN
-# =====================================================
-
 if __name__ == "__main__":
-
     main()
