@@ -5,6 +5,8 @@ AHNG MUSIC - \u0631\u0628\u0627\u062a \u0645\u0648\u0633\u06cc\u0642\u06cc \u063
 """
 import os
 import re
+import json
+from collections import deque
 import time
 import sqlite3
 import requests
@@ -303,29 +305,55 @@ def handle_button(inline, chat_id):
             send(chat_id, "\u0647\u0646\u0648\u0632 \u0639\u0636\u0648 \u0646\u06cc\u0633\u062a\u06cc\u062f \u274c \u0627\u0628\u062a\u062f\u0627 \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644 \u0639\u0636\u0648 \u0634\u0648\u06cc\u062f \u0648 \u062f\u0648\u0628\u0627\u0631\u0647 \xab\u062a\u0623\u06cc\u06cc\u062f \u0639\u0636\u0648\u06cc\u062a\xbb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f.")
 
 
+
+def process_update(u):
+    chat_id = u.get("chat_id")
+    if u.get("type") == "NewMessage":
+        handle_message(u["new_message"], chat_id)
+    elif u.get("inline_message"):
+        im = u["inline_message"]
+        print("BUTTON (inline):", im)
+        handle_button(im, im.get("chat_id") or chat_id)
+    else:
+        print("UPDATE:", str(u)[:300])
+
+
 def main():
     if not BOT_TOKEN:
-        raise SystemExit("BOT_TOKEN \u062a\u0646\u0638\u06cc\u0645 \u0646\u0634\u062f\u0647 \u0627\u0633\u062a.")
+        raise SystemExit("BOT_TOKEN تنظیم نشده است.")
     offset = None
+    seen, order = set(), deque()
+    first = True
     print("AHNG MUSIC bot started...")
     while True:
+        batch = []
+        # ۱) با offset (برای پیام‌های عادی)
         d = {"limit": 50}
         if offset:
             d["offset_id"] = offset
         data = call("getUpdates", **d).get("data") or {}
-        offset = data.get("next_offset_id", offset)
-        for u in data.get("updates", []):
+        if data.get("next_offset_id"):
+            offset = data["next_offset_id"]
+        batch += data.get("updates", [])
+        # ۲) بدون offset (روبیکا کلیک دکمه‌ی شیشه‌ای را با offset نمی‌دهد)
+        data2 = call("getUpdates", limit=50).get("data") or {}
+        batch += data2.get("updates", [])
+
+        for u in batch:
+            key = json.dumps(u, sort_keys=True, ensure_ascii=False)
+            if key in seen:
+                continue
+            seen.add(key)
+            order.append(key)
+            if len(order) > 3000:
+                seen.discard(order.popleft())
+            if first:
+                continue      # آپدیت‌های قدیمیِ قبل از روشن شدن را رد کن
             try:
-                chat_id = u.get("chat_id")
-                if u.get("type") == "NewMessage":
-                    handle_message(u["new_message"], chat_id)
-                elif u.get("inline_message"):
-                    print("BUTTON (inline):", u["inline_message"])
-                    handle_button(u["inline_message"], chat_id)
-                else:
-                    print("UPDATE:", str(u)[:300])
+                process_update(u)
             except Exception as e:
                 print("handler error:", e)
+        first = False
         time.sleep(1)
 
 
