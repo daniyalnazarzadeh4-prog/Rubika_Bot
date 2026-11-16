@@ -6,10 +6,11 @@ AHNG MUSIC - \u0631\u0628\u0627\u062a \u0645\u0648\u0633\u06cc\u0642\u06cc \u063
 import os
 import re
 import json
-from collections import deque
+from collections import Counter
 import time
 import sqlite3
 import requests
+from concurrent.futures import ThreadPoolExecutor
 
 # ============ \u062a\u0646\u0638\u06cc\u0645\u0627\u062a ============
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
@@ -31,9 +32,12 @@ db.commit()
 
 
 # ============ API ============
+session = requests.Session()      # Ø§ØªØµØ§Ù„ Ø±Ø§ Ù†Ú¯Ù‡ Ù…ÛŒâ€ŒØ¯Ø§Ø±Ø¯ ØªØ§ Ù‡Ø± Ø¨Ø§Ø± Ø§Ø² Ø§ÙˆÙ„ ÙˆØµÙ„ Ù†Ø´ÙˆØ¯
+
+
 def call(method, **data):
     try:
-        return requests.post(API + method, json=data, timeout=30).json()
+        return session.post(API + method, json=data, timeout=(5, 15)).json()
     except Exception as e:
         print("API error:", method, e)
         return {}
@@ -260,6 +264,7 @@ def handle_button(inline, chat_id):
     # \u062f\u06a9\u0645\u0647\u200c\u0647\u0627\u06cc \u067e\u0646\u0644 \u0645\u062f\u06cc\u0631: \u0641\u0642\u0637 \u0628\u0631\u0627\u06cc \u0627\u062f\u0645\u06cc\u0646\u200c\u0647\u0627
     if bid.startswith("adm:"):
         if not is_admin(sender):
+            print("IGNORED admin button, sender is not in ADMINS:", sender, flush=True)
             return
         if bid == "adm:add":
             admin_state[sender] = {"mode": "await_song_add"}
@@ -306,55 +311,66 @@ def handle_button(inline, chat_id):
 
 
 
-def process_update(u):
-    chat_id = u.get("chat_id")
-    if u.get("type") == "NewMessage":
-        handle_message(u["new_message"], chat_id)
-    elif u.get("inline_message"):
-        im = u["inline_message"]
-        print("BUTTON (inline):", im)
-        handle_button(im, im.get("chat_id") or chat_id)
-    else:
-        print("UPDATE:", str(u)[:300])
+def ukey(u):
+    return json.dumps(u, sort_keys=True, ensure_ascii=False)
 
 
 def main():
     if not BOT_TOKEN:
-        raise SystemExit("BOT_TOKEN تنظیم نشده است.")
+        raise SystemExit("BOT_TOKEN ØªÙ†Ø¸ÛŒÙ… Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.")
+    pool = ThreadPoolExecutor(2)
     offset = None
-    seen, order = set(), deque()
-    first = True
-    print("AHNG MUSIC bot started...")
+    prev = None          # Ø´Ù…Ø§Ø±Ø´ Ø¢Ù¾Ø¯ÛŒØªâ€ŒÙ‡Ø§ÛŒ Ø¯ÙˆØ± Ù‚Ø¨Ù„Ù (Ø¨Ø¯ÙˆÙ† offset)
+    beat = 0
+    print("AHNG MUSIC bot started...", flush=True)
     while True:
-        batch = []
-        # ۱) با offset (برای پیام‌های عادی)
+        # ---- Ø§Ù„Ù) Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ: Ø¨Ø¯ÙˆÙ† offset Ú¯Ø±ÙØªÙ‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯ØŒ ÙÙ‚Ø· Ù…ÙˆØ§Ø±Ø¯ Â«ØªØ§Ø²Ù‡Â» Ø§Ø¬Ø±Ø§ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯ ----
         d = {"limit": 50}
         if offset:
             d["offset_id"] = offset
-        data = call("getUpdates", **d).get("data") or {}
+        fa = pool.submit(call, "getUpdates", limit=100)
+        fb = pool.submit(call, "getUpdates", **d)
+        r = fa.result()
+        if r.get("status") not in (None, "OK"):
+            print("getUpdates (no offset) answer:", str(r)[:300], flush=True)
+        ups = (r.get("data") or {}).get("updates", []) or []
+        cur = Counter(ukey(u) for u in ups)
+        if prev is not None:
+            fresh = cur - prev          # ÙÙ‚Ø· Ø¢Ù†Ú†Ù‡ Ø§Ø² Ø¯ÙˆØ± Ù‚Ø¨Ù„ Ø§Ø¶Ø§ÙÙ‡ Ø´Ø¯Ù‡
+            for u in ups:
+                k = ukey(u)
+                if fresh.get(k, 0) <= 0:
+                    continue
+                if u.get("inline_message"):
+                    fresh[k] -= 1
+                    im = u["inline_message"]
+                    print("BUTTON (inline):", str(im)[:300], flush=True)
+                    try:
+                        handle_button(im, im.get("chat_id") or u.get("chat_id"))
+                    except Exception as e:
+                        print("button handler error:", e, flush=True)
+                elif u.get("type") not in ("NewMessage", "RemovedMessage"):
+                    fresh[k] -= 1
+                    print("UPDATE:", str(u)[:300], flush=True)
+        prev = cur
+
+        # ---- Ø¨) Ù¾ÛŒØ§Ù…â€ŒÙ‡Ø§ÛŒ Ø¹Ø§Ø¯ÛŒ: Ø¨Ø§ offset ----
+        r2 = fb.result()
+        data = r2.get("data") or {}
         if data.get("next_offset_id"):
             offset = data["next_offset_id"]
-        batch += data.get("updates", [])
-        # ۲) بدون offset (روبیکا کلیک دکمه‌ی شیشه‌ای را با offset نمی‌دهد)
-        data2 = call("getUpdates", limit=50).get("data") or {}
-        batch += data2.get("updates", [])
-
-        for u in batch:
-            key = json.dumps(u, sort_keys=True, ensure_ascii=False)
-            if key in seen:
+        for u in data.get("updates", []) or []:
+            if u.get("type") != "NewMessage":
                 continue
-            seen.add(key)
-            order.append(key)
-            if len(order) > 3000:
-                seen.discard(order.popleft())
-            if first:
-                continue      # آپدیت‌های قدیمیِ قبل از روشن شدن را رد کن
             try:
-                process_update(u)
+                handle_message(u["new_message"], u.get("chat_id"))
             except Exception as e:
-                print("handler error:", e)
-        first = False
-        time.sleep(1)
+                print("handler error:", e, flush=True)
+
+        beat += 1
+        if beat % 200 == 0:
+            print("alive", flush=True)
+        time.sleep(0.3)
 
 
 if __name__ == "__main__":
