@@ -1,407 +1,1444 @@
 # -*- coding: utf-8 -*-
 """
-AHNG MUSIC - \u0631\u0628\u0627\u062a \u0645\u0648\u0633\u06cc\u0642\u06cc \u0631\u0648\u0628\u06cc\u06a9\u0627
-\u0627\u062c\u0631\u0627: BOT_TOKEN=xxxx python ahng_music_bot.py
+AHNG MUSIC - Rubika Music Bot
+Rubika Bot API v3
+Python + requests + SQLite
+
+Run:
+BOT_TOKEN=xxxx python ahng_music_bot.py
 """
+
 import os
 import re
-import json
-from collections import Counter
 import time
 import sqlite3
+import logging
 import requests
-from concurrent.futures import ThreadPoolExecutor
 
-# ============ \u062a\u0646\u0638\u06cc\u0645\u0627\u062a ============
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMINS = {"u0HbMCz07b206d47b6e01988bf7610cf"}      # guid \u0645\u062f\u06cc\u0631\u0647\u0627 (\u0628\u0627 /myid \u0645\u06cc\u200c\u06af\u06cc\u0631\u06cc\u062f)
-BOT_USERNAME = "ahng_music_bot"      # \u0622\u06cc\u062f\u06cc \u0631\u0628\u0627\u062a \u0628\u062f\u0648\u0646 @
+from urllib.parse import quote
+
+
+# =====================================================
+# CONFIG
+# =====================================================
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+
+BOT_USERNAME = "ahng_music_bot"
+
+ADMINS = {
+    x.strip()
+    for x in os.getenv(
+        "ADMINS",
+        "u0HbMCz07b206d47b6e01988bf7610cf"
+    ).split(",")
+    if x.strip()
+}
+
 DB_FILE = os.getenv("DB_FILE", "ahng.db")
+
 API = f"https://botapi.rubika.ir/v3/{BOT_TOKEN}/"
 
-# ============ \u062f\u06cc\u062a\u0627\u0628\u06cc\u0633 ============
-db = sqlite3.connect(DB_FILE, check_same_thread=False)
-db.executescript("""
-CREATE TABLE IF NOT EXISTS songs(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT, artist TEXT, file_id TEXT, downloads INTEGER DEFAULT 0, added_at INTEGER);
-CREATE TABLE IF NOT EXISTS users(guid TEXT PRIMARY KEY, joined_at INTEGER);
-CREATE TABLE IF NOT EXISTS channels(guid TEXT PRIMARY KEY, link TEXT);
-""")
-db.commit()
+POLL_INTERVAL = 0.4
+
+REQUEST_TIMEOUT = (5, 20)
 
 
-# ============ API ============
-session = requests.Session()      # اتصال را نگه می‌دارد تا هر بار از اول وصل نشود
+# =====================================================
+# LOGGING
+# =====================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+
+log = logging.getLogger("AHNG_MUSIC")
+
+
+# =====================================================
+# HTTP SESSION
+# =====================================================
+
+session = requests.Session()
+
+session.headers.update({
+    "Content-Type": "application/json",
+    "User-Agent": "AHNG-MUSIC-BOT/1.0"
+})
 
 
 def call(method, **data):
+
     try:
-        return session.post(API + method, json=data, timeout=(5, 15)).json()
-    except Exception as e:
-        print("API error:", method, e)
+
+        response = session.post(
+            API + method,
+            json=data,
+            timeout=REQUEST_TIMEOUT
+        )
+
+        response.raise_for_status()
+
+        result = response.json()
+
+        if result.get("status") not in (None, "OK"):
+
+            log.error(
+                "API ERROR | %s | %s",
+                method,
+                result
+            )
+
+        return result
+
+    except Exception:
+
+        log.exception("REQUEST ERROR | %s", method)
+
         return {}
 
 
-BTN_BY_CHAT = {}     # chat_id -> {متن دکمه: شناسه}
-GLOBAL_BTN = {}      # دکمه‌های ثابت پنل (بعد از ری‌استارت هم کار می‌کنند)
+# =====================================================
+# DATABASE
+# =====================================================
+
+db = sqlite3.connect(
+    DB_FILE,
+    check_same_thread=False,
+    timeout=30
+)
+
+db.execute("PRAGMA journal_mode=WAL")
+
+db.execute("PRAGMA busy_timeout=30000")
+
+db.executescript("""
+
+CREATE TABLE IF NOT EXISTS songs(
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    title TEXT,
+
+    artist TEXT,
+
+    file_id TEXT,
+
+    downloads INTEGER DEFAULT 0,
+
+    added_at INTEGER
+
+);
+
+CREATE TABLE IF NOT EXISTS users(
+
+    guid TEXT PRIMARY KEY,
+
+    joined_at INTEGER
+
+);
+
+CREATE TABLE IF NOT EXISTS channels(
+
+    guid TEXT PRIMARY KEY,
+
+    link TEXT
+
+);
+
+""")
+
+db.commit()
 
 
-def send(chat_id, text, keypad=None):
-    d = {"chat_id": chat_id, "text": text}
-    if keypad:
-        btns = [b for r in keypad["rows"] for b in r["buttons"]]
-        if all(b.get("type") == "Simple" for b in btns):
-            m = BTN_BY_CHAT.setdefault(chat_id, {})
-            for b in btns:
-                t = b["button_text"].strip()
-                m[t] = b["id"]
-                if b["id"].startswith("adm:") and b["id"].count(":") < 2:
-                    GLOBAL_BTN[t] = b["id"]
-            if chat_id is None:
-                BTN_BY_CHAT.pop(None, None)
-                return {}
-            kp = dict(keypad)
-            kp["resize_keyboard"] = True
-            kp["on_time_keyboard"] = False
-            d["chat_keypad"] = kp
-            d["chat_keypad_type"] = "New"
-        else:
-            d["inline_keypad"] = keypad
-    return call("sendMessage", **d)
-
-
-def simple_btn(bid, text):
-    return {"id": bid, "type": "Simple", "button_text": text}
-
-
-def link_btn(bid, text, url):
-    return {"id": bid, "type": "Link", "button_text": text,
-            "button_link": {"type": "url", "link_url": url}}
-
-
-def keypad(rows):
-    return {"rows": [{"buttons": r} for r in rows]}
-
-
-# ============ \u06a9\u0627\u0646\u0627\u0644\u200c\u0647\u0627 \u0648 \u0639\u0636\u0648\u06cc\u062a ============
-def channels():
-    return db.execute("SELECT guid, link FROM channels").fetchall()
-
-
-def is_member(user_guid):
-    """\u0647\u0631 \u0628\u0627\u0631 \u0627\u0632 \u0631\u0648\u0628\u06cc\u06a9\u0627 \u067e\u0631\u0633\u06cc\u062f\u0647 \u0645\u06cc\u200c\u0634\u0648\u062f (\u0630\u062e\u06cc\u0631\u0647 \u0646\u0645\u06cc\u200c\u0634\u0648\u062f)\u060c \u067e\u0633 \u062e\u0631\u0648\u062c \u0627\u0632 \u06a9\u0627\u0646\u0627\u0644 \u0647\u0645 \u062f\u06cc\u062f\u0647 \u0645\u06cc\u200c\u0634\u0648\u062f."""
-    for guid, _ in channels():
-        res = call("getChatMember", chat_id=guid, user_id=user_guid)
-        status = str((res.get("data") or {}).get("status", "")).lower()
-        if status not in ("member", "creator", "admin", "owner"):
-            return False
-    return True
-
-
-def join_prompt(chat_id, payload):
-    rows = [[link_btn(f"ch{i}", f"\U0001f4e2 کانال {i + 1}", link)] for i, (_, link) in enumerate(channels())]
-    send(chat_id, "برای دریافت آهنگ ابتدا در کانال(های) زیر عضو شوید:", keypad(rows))
-    send(chat_id, "بعد از عضویت، دکمه‌ی «تأیید عضویت» را بزنید:",
-         keypad([[simple_btn(f"joined:{payload}", "✅ تأیید عضویت")]]))
-
-
-# ============ \u0622\u0647\u0646\u06af\u200c\u0647\u0627 ============
-def song_link(sid):
-    return f"https://rubika.ir/{BOT_USERNAME}?start=song_{sid}"
-
-
-def send_song(chat_id, song_id):
-    row = db.execute("SELECT title, artist, file_id FROM songs WHERE id=?", (song_id,)).fetchone()
-    if not row:
-        return send(chat_id, "\u0622\u0647\u0646\u06af \u067e\u06cc\u062f\u0627 \u0646\u0634\u062f.")
-    title, artist, file_id = row
-    call("sendFile", chat_id=chat_id, file_id=file_id,
-         text=f"\U0001f3b5 {title}\n\U0001f3a4 {artist}\n\n@{BOT_USERNAME}")
-    db.execute("UPDATE songs SET downloads=downloads+1 WHERE id=?", (song_id,))
+def db_commit():
     db.commit()
 
 
-def deliver(chat_id, user_guid, payload):
-    """\u062f\u0631\u06cc\u0627\u0641\u062a \u0622\u0647\u0646\u06af: \u0627\u06af\u0631 \u0639\u0636\u0648 \u0646\u0628\u0627\u0634\u062f \u0639\u0636\u0648\u06cc\u062a \u0627\u062c\u0628\u0627\u0631\u06cc\u060c \u0648\u06af\u0631\u0646\u0647 \u0627\u0631\u0633\u0627\u0644."""
-    if not payload.startswith("song_"):
-        return
-    if channels() and not is_member(user_guid):
-        return join_prompt(chat_id, payload)
-    send_song(chat_id, payload[5:])
+# =====================================================
+# STATES
+# =====================================================
 
+admin_state = {}
+
+pending_channel_link = {}
+
+
+# =====================================================
+# BUTTON SYSTEM
+# ALL BUTTONS ARE LINK BUTTONS
+# =====================================================
+
+def bot_link(payload):
+
+    return (
+        f"https://rubika.ir/{BOT_USERNAME}"
+        f"?start={quote(str(payload), safe='_')}"
+    )
+
+
+def link_button(button_id, text, url):
+
+    return {
+
+        "id": str(button_id),
+
+        "type": "Link",
+
+        "button_text": text,
+
+        "button_link": {
+
+            "type": "url",
+
+            "link_url": url
+
+        }
+
+    }
+
+
+def action_button(action, text):
+
+    return link_button(
+        action,
+        text,
+        bot_link(action)
+    )
+
+
+def channel_button(index, text, url):
+
+    return link_button(
+        f"channel_{index}",
+        text,
+        url
+    )
+
+
+def keypad(rows):
+
+    return {
+
+        "rows": [
+
+            {"buttons": row}
+
+            for row in rows
+
+        ]
+
+    }
+
+
+def send(chat_id, text, buttons=None):
+
+    if not chat_id:
+
+        log.warning("SEND CANCELLED: chat_id is empty")
+
+        return {}
+
+    data = {
+
+        "chat_id": chat_id,
+
+        "text": str(text)
+
+    }
+
+    if buttons:
+
+        data["inline_keypad"] = buttons
+
+    result = call("sendMessage", **data)
+
+    log.info(
+        "SEND MESSAGE | chat=%s | status=%s",
+        chat_id,
+        result.get("status")
+    )
+
+    return result
+
+
+# =====================================================
+# CHANNELS
+# =====================================================
+
+def channels():
+
+    return db.execute(
+        "SELECT guid, link FROM channels"
+    ).fetchall()
+
+
+def is_member(user_guid):
+
+    if not user_guid:
+
+        return False
+
+    for guid, link in channels():
+
+        result = call(
+            "getChatMember",
+            chat_id=guid,
+            user_id=user_guid
+        )
+
+        status = str(
+            (result.get("data") or {}).get("status", "")
+        ).lower()
+
+        log.info(
+            "MEMBERSHIP | user=%s | channel=%s | status=%s",
+            user_guid,
+            guid,
+            status
+        )
+
+        if status not in (
+            "member",
+            "creator",
+            "admin",
+            "owner"
+        ):
+
+            return False
+
+    return True
+
+
+# =====================================================
+# SONG LINKS
+# =====================================================
+
+def song_link(song_id):
+
+    return bot_link(f"song_{song_id}")
+
+
+def get_song(song_id):
+
+    return db.execute(
+        """
+        SELECT title, artist, file_id
+        FROM songs
+        WHERE id=?
+        """,
+        (song_id,)
+    ).fetchone()
+
+
+# =====================================================
+# SEND SONG
+# =====================================================
+
+def send_song(chat_id, song_id):
+
+    song = get_song(song_id)
+
+    if not song:
+
+        return send(
+            chat_id,
+            "❌ آهنگ موردنظر پیدا نشد."
+        )
+
+    title, artist, file_id = song
+
+    result = call(
+        "sendFile",
+        chat_id=chat_id,
+        file_id=file_id,
+        text=(
+            f"🎵 {title}\n"
+            f"🎤 {artist}\n\n"
+            f"@{BOT_USERNAME}"
+        )
+    )
+
+    if result.get("status") == "OK":
+
+        db.execute(
+            """
+            UPDATE songs
+            SET downloads = downloads + 1
+            WHERE id=?
+            """,
+            (song_id,)
+        )
+
+        db_commit()
+
+        log.info(
+            "SONG SENT | song=%s | chat=%s",
+            song_id,
+            chat_id
+        )
+
+    return result
+
+
+# =====================================================
+# MEMBERSHIP PROMPT
+# =====================================================
+
+def join_prompt(chat_id, payload):
+
+    rows = []
+
+    for index, (guid, link) in enumerate(channels()):
+
+        rows.append([
+
+            channel_button(
+                index,
+                f"📢 کانال {index + 1}",
+                link
+            )
+
+        ])
+
+    rows.append([
+
+        action_button(
+            f"joined_{payload}",
+            "✅ تأیید عضویت"
+        )
+
+    ])
+
+    send(
+        chat_id,
+        "🔒 برای دریافت آهنگ ابتدا در کانال‌های زیر عضو شوید:",
+        keypad(rows)
+    )
+
+
+def deliver(chat_id, user_guid, payload):
+
+    if not payload.startswith("song_"):
+
+        return
+
+    song_id = payload[5:]
+
+    if not song_id.isdigit():
+
+        return send(chat_id, "❌ لینک آهنگ معتبر نیست.")
+
+    if not get_song(song_id):
+
+        return send(chat_id, "❌ آهنگ پیدا نشد.")
+
+    if channels():
+
+        if not is_member(user_guid):
+
+            return join_prompt(
+                chat_id,
+                payload
+            )
+
+    return send_song(chat_id, song_id)
+
+
+# =====================================================
+# STATISTICS
+# =====================================================
 
 def stats(chat_id):
-    users = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    songs, dl = db.execute("SELECT COUNT(*), COALESCE(SUM(downloads),0) FROM songs").fetchone()
-    best = db.execute("SELECT id, title, downloads FROM songs ORDER BY downloads DESC LIMIT 10").fetchall()
-    txt = f"\U0001f4ca \u0622\u0645\u0627\u0631 AHNG MUSIC\n\U0001f464 \u06a9\u0627\u0631\u0628\u0631\u0627\u0646: {users}\n\U0001f3b5 \u0622\u0647\u0646\u06af\u200c\u0647\u0627: {songs}\n\u2b07\ufe0f \u062f\u0627\u0646\u0644\u0648\u062f\u0647\u0627: {dl}\n\n"
-    txt += "\n".join(f"{i}. {t} \u2190 {d}" for i, t, d in best)
-    send(chat_id, txt)
+
+    users = db.execute(
+        "SELECT COUNT(*) FROM users"
+    ).fetchone()[0]
+
+    songs, downloads = db.execute(
+        """
+        SELECT
+            COUNT(*),
+            COALESCE(SUM(downloads), 0)
+        FROM songs
+        """
+    ).fetchone()
+
+    best = db.execute(
+        """
+        SELECT id, title, downloads
+        FROM songs
+        ORDER BY downloads DESC
+        LIMIT 10
+        """
+    ).fetchall()
+
+    text = (
+        "📊 آمار AHNG MUSIC\n\n"
+        f"👤 کاربران: {users}\n"
+        f"🎵 آهنگ‌ها: {songs}\n"
+        f"⬇️ دانلودها: {downloads}\n\n"
+        "🏆 ۱۰ آهنگ پردانلود:\n\n"
+    )
+
+    if best:
+
+        text += "\n".join(
+
+            f"{i}. {title} | {count} دانلود"
+
+            for i, (song_id, title, count)
+            in enumerate(best, 1)
+
+        )
+
+    else:
+
+        text += "هنوز آهنگی ثبت نشده است."
+
+    return send(chat_id, text)
 
 
-# ============ \u067e\u0646\u0644 \u0645\u062f\u06cc\u0631 ============
+# =====================================================
+# CHANNEL LIST
+# =====================================================
+
+def channel_list(chat_id):
+
+    items = channels()
+
+    if not items:
+
+        return send(
+            chat_id,
+            "📭 هنوز کانالی ثبت نشده است."
+        )
+
+    text = "📋 کانال‌های ثبت‌شده:\n\n"
+
+    text += "\n".join(
+
+        f"{i}. {guid}\n{link}"
+
+        for i, (guid, link) in enumerate(items, 1)
+
+    )
+
+    return send(chat_id, text)
+
+
+# =====================================================
+# ADMIN
+# =====================================================
+
 def is_admin(guid):
+
     return guid in ADMINS
 
 
 def admin_panel(chat_id):
+
     rows = [
-        [simple_btn("adm:add", "\u2795 \u0627\u0641\u0632\u0648\u062f\u0646 \u0622\u0647\u0646\u06af"), simple_btn("adm:upload", "\U0001f680 \u0622\u067e\u0644\u0648\u062f \u0648 \u0627\u0646\u062a\u0634\u0627\u0631")],
-        [simple_btn("adm:addch", "\U0001f4e2 \u062b\u0628\u062a \u06a9\u0627\u0646\u0627\u0644"), simple_btn("adm:stats", "\U0001f4ca \u0622\u0645\u0627\u0631")],
-        [simple_btn("adm:channels", "\U0001f4cb \u06a9\u0627\u0646\u0627\u0644\u200c\u0647\u0627")],
+
+        [
+            action_button(
+                "adm_add",
+                "➕ افزودن آهنگ"
+            ),
+
+            action_button(
+                "adm_upload",
+                "🚀 آپلود و انتشار"
+            )
+        ],
+
+        [
+            action_button(
+                "adm_addch",
+                "📢 ثبت کانال"
+            ),
+
+            action_button(
+                "adm_stats",
+                "📊 آمار"
+            )
+        ],
+
+        [
+            action_button(
+                "adm_channels",
+                "📋 کانال‌ها"
+            )
+        ]
+
     ]
-    send(chat_id, "\U0001f6e0 \u067e\u0646\u0644 \u0645\u062f\u06cc\u0631\u06cc\u062a AHNG MUSIC\n\u06cc\u06a9\u06cc \u0627\u0632 \u06af\u0632\u06cc\u0646\u0647\u200c\u0647\u0627 \u0631\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f:", keypad(rows))
+
+    return send(
+        chat_id,
+        "🛠 پنل مدیریت AHNG MUSIC\n\n"
+        "یکی از گزینه‌های زیر را انتخاب کنید:",
+        keypad(rows)
+    )
 
 
-def post_to_channels(sid, caption):
-    """\u0627\u0646\u062a\u0634\u0627\u0631 \u0622\u0647\u0646\u06af \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644\u200c\u0647\u0627\u06cc \u062b\u0628\u062a\u200c\u0634\u062f\u0647 \u0628\u0627 \u062f\u06a9\u0645\u0647\u200c\u06cc \u0634\u06cc\u0634\u0647\u200c\u0627\u06cc \u062f\u0631\u06cc\u0627\u0641\u062a."""
-    row = db.execute("SELECT file_id FROM songs WHERE id=?", (sid,)).fetchone()
-    if not row:
+# =====================================================
+# SAVE SONG
+# =====================================================
+
+def save_song(message, sender):
+
+    file = message.get("file") or {}
+
+    file_id = file.get("file_id")
+
+    if not file_id:
+
+        return None
+
+    filename = (
+        file.get("file_name")
+        or "آهنگ"
+    )
+
+    filename = filename.rsplit(".", 1)[0]
+
+    title = filename
+
+    artist = "-"
+
+    caption = (message.get("text") or "").strip()
+
+    if "|" in caption:
+
+        title, artist = [
+            x.strip()
+            for x in caption.split("|", 1)
+        ]
+
+    db.execute(
+        """
+        INSERT INTO songs
+        (title, artist, file_id, downloads, added_at)
+        VALUES (?, ?, ?, 0, ?)
+        """,
+        (
+            title,
+            artist,
+            file_id,
+            int(time.time())
+        )
+    )
+
+    db_commit()
+
+    song_id = db.execute(
+        "SELECT last_insert_rowid()"
+    ).fetchone()[0]
+
+    log.info(
+        "SONG SAVED | id=%s | title=%s | sender=%s",
+        song_id,
+        title,
+        sender
+    )
+
+    return song_id, title, artist
+
+
+# =====================================================
+# PUBLISH SONG
+# =====================================================
+
+def post_to_channels(song_id, caption):
+
+    song = get_song(song_id)
+
+    if not song:
+
         return 0
-    kp = keypad([[link_btn("dl", "\U0001f3a7 \u062f\u0631\u06cc\u0627\u0641\u062a \u0622\u0647\u0646\u06af", song_link(sid))]])
-    ok = 0
-    for guid, _ in channels():
-        res = call("sendFile", chat_id=guid, file_id=row[0], text=caption, inline_keypad=kp)
-        if res and res.get("status", "OK") == "OK":
-            ok += 1
-    return ok
+
+    title, artist, file_id = song
+
+    buttons = keypad([
+
+        [
+
+            link_button(
+                f"song_{song_id}",
+                "🎧 دریافت آهنگ",
+                song_link(song_id)
+            )
+
+        ]
+
+    ])
+
+    success = 0
+
+    for guid, link in channels():
+
+        result = call(
+            "sendFile",
+            chat_id=guid,
+            file_id=file_id,
+            text=caption,
+            inline_keypad=buttons
+        )
+
+        if result.get("status") == "OK":
+
+            success += 1
+
+        log.info(
+            "PUBLISH | channel=%s | result=%s",
+            guid,
+            result
+        )
+
+    return success
 
 
-# ============ \u067e\u06cc\u0627\u0645\u200c\u0647\u0627 ============
-admin_state = {}            # admin guid -> \u0645\u0631\u062d\u0644\u0647\u200c\u06cc \u0641\u0639\u0644\u06cc (\u0627\u0641\u0632\u0648\u062f\u0646/\u0622\u067e\u0644\u0648\u062f)
-pending_channel_link = {}   # admin guid -> \u0644\u06cc\u0646\u06a9 \u06a9\u0627\u0646\u0627\u0644\u06cc \u06a9\u0647 \u0645\u0646\u062a\u0638\u0631 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u067e\u0633\u062a \u0627\u0633\u062a
+# =====================================================
+# ADMIN TEXT HANDLER
+# =====================================================
 
+def handle_admin(message, chat_id, sender, text):
 
-def handle_admin(m, chat_id, sender, text):
-    f = m.get("file")
-    fwd = m.get("forwarded_from") or {}
+    file = message.get("file")
 
-    # \u06f1) \u0641\u0631\u0633\u062a\u0627\u062f\u0646 \u0622\u0647\u0646\u06af -> \u0630\u062e\u06cc\u0631\u0647 + \u0633\u0627\u062e\u062a \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc
-    if f:
-        name = (f.get("file_name") or "\u0622\u0647\u0646\u06af").rsplit(".", 1)[0]
-        title, artist = (name, "-")
-        if text:
-            title, artist = [x.strip() for x in (text.split("|", 1) + ["-"])[:2]]
-        db.execute("INSERT INTO songs(title,artist,file_id,added_at) VALUES(?,?,?,?)",
-                   (title, artist, f["file_id"], int(time.time())))
-        db.commit()
-        sid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-        st = admin_state.get(sender) or {}
-        if st.get("mode") == "await_song_upload":
-            admin_state[sender] = {"mode": "saved", "sid": sid}
-            return send(chat_id, f"\u2705 \u0630\u062e\u06cc\u0631\u0647 \u0634\u062f: {title} - {artist}\n\u0628\u0631\u0627\u06cc \u0627\u062f\u0627\u0645\u0647 \u062f\u06a9\u0645\u0647\u200c\u06cc \u0632\u06cc\u0631 \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f:",
-                        keypad([[simple_btn(f"adm:text:{sid}", "\u270d\ufe0f \u0646\u0648\u0634\u062a\u0646 \u0645\u062a\u0646 \u067e\u0633\u062a")]]))
+    forwarded = message.get("forwarded_from") or {}
+
+    state = admin_state.get(sender) or {}
+
+    mode = state.get("mode")
+
+    # -------------------------------------------------
+    # RECEIVE SONG
+    # -------------------------------------------------
+
+    if file:
+
+        saved = save_song(message, sender)
+
+        if not saved:
+
+            return send(
+                chat_id,
+                "❌ فایل آهنگ شناسایی نشد."
+            )
+
+        song_id, title, artist = saved
+
+        if mode == "await_upload":
+
+            admin_state[sender] = {
+
+                "mode": "await_post_text",
+
+                "sid": song_id
+
+            }
+
+            return send(
+                chat_id,
+                f"✅ آهنگ ذخیره شد:\n"
+                f"{title} - {artist}\n\n"
+                "✍️ حالا متن پست را ارسال کنید:"
+            )
+
         admin_state.pop(sender, None)
-        send(chat_id, f"\u2705 \u0630\u062e\u06cc\u0631\u0647 \u0634\u062f: {title} - {artist}\n\u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc (\u06a9\u067e\u06cc \u06a9\u0646\u06cc\u062f \u0648 \u062f\u0631 \u062f\u06a9\u0645\u0647\u200c\u06cc \u0634\u06cc\u0634\u0647\u200c\u0627\u06cc \u067e\u0633\u062a \u06a9\u0627\u0646\u0627\u0644 \u0628\u06af\u0630\u0627\u0631\u06cc\u062f):")
-        return send(chat_id, song_link(sid))
 
-    # \u0645\u0631\u0627\u062d\u0644 \u0622\u067e\u0644\u0648\u062f: \u0645\u062a\u0646 \u067e\u0633\u062a -> \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc -> \u062a\u0623\u06cc\u06cc\u062f \u0646\u0647\u0627\u06cc\u06cc
-    st = admin_state.get(sender) or {}
-    mode = st.get("mode")
-    if mode in ("await_text", "await_link") and text and not text.startswith("/"):
-        sid = st["sid"]
-        if mode == "await_text":
-            st["text"] = text
-            st["mode"] = "await_link"
-            return send(chat_id, "\u2705 \u0645\u062a\u0646 \u062b\u0628\u062a \u0634\u062f.\n\u062d\u0627\u0644\u0627 \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc \u0622\u0647\u0646\u06af \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f:\n" + song_link(sid))
-        mm = re.search(r"song_(\d+)", text)
-        if not mm or mm.group(1) != str(sid):
-            return send(chat_id, "\u0644\u06cc\u0646\u06a9 \u062f\u0631\u0633\u062a \u0646\u06cc\u0633\u062a. \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc \u0647\u0645\u06cc\u0646 \u0622\u0647\u0646\u06af \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f:\n" + song_link(sid))
-        st["mode"] = "await_confirm"
-        return send(chat_id, f"\u067e\u06cc\u0634\u200c\u0646\u0645\u0627\u06cc\u0634 \u067e\u0633\u062a:\n\n{st['text']}\n\n@{BOT_USERNAME}\n\n\u062a\u0623\u06cc\u06cc\u062f \u0645\u06cc\u200c\u06a9\u0646\u06cc\u062f \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644 \u0645\u0646\u062a\u0634\u0631 \u0634\u0648\u062f\u061f",
-                    keypad([[simple_btn(f"adm:post:{sid}", "\u2705 \u062a\u0623\u06cc\u06cc\u062f \u0646\u0647\u0627\u06cc\u06cc"), simple_btn("adm:cancel", "\u274c \u0644\u063a\u0648")]]))
+        return send(
+            chat_id,
+            f"✅ آهنگ ذخیره شد:\n"
+            f"{title} - {artist}\n\n"
+            f"🔗 لینک اختصاصی:\n{song_link(song_id)}"
+        )
 
-    # \u06f2) \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u067e\u0633\u062a \u06a9\u0627\u0646\u0627\u0644 -> \u062b\u0628\u062a guid \u06a9\u0627\u0646\u0627\u0644
-    if fwd and pending_channel_link.get(sender):
-        guid = fwd.get("from_chat_id")
-        if guid:
-            db.execute("INSERT OR REPLACE INTO channels VALUES(?,?)", (guid, pending_channel_link.pop(sender)))
-            db.commit()
-            return send(chat_id, "\u2705 \u06a9\u0627\u0646\u0627\u0644 \u062b\u0628\u062a \u0634\u062f. \u06cc\u0627\u062f\u062a\u0627\u0646 \u0628\u0627\u0634\u062f \u0631\u0628\u0627\u062a \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644 \u0627\u062f\u0645\u06cc\u0646 \u0628\u0627\u0634\u062f.")
+    # -------------------------------------------------
+    # ADD CHANNEL FORWARD
+    # -------------------------------------------------
 
-    # \u06f3) \u0644\u06cc\u0646\u06a9 \u06a9\u0627\u0646\u0627\u0644 -> \u062a\u0644\u0627\u0634 \u0628\u0631\u0627\u06cc \u0639\u0636\u0648 \u0634\u062f\u0646 + \u062f\u0631\u062e\u0648\u0627\u0633\u062a \u0641\u0648\u0631\u0648\u0627\u0631\u062f
-    first = text.split()[0] if text else ""
-    is_username = first.startswith("@") and len(first) > 2 and first[1:].lower() != BOT_USERNAME.lower()
-    is_link = ("rubika.ir/" in first or "rubika.me/" in first) and BOT_USERNAME.lower() not in first.lower()
-    if is_username or is_link:
-        if True:
-            link = "https://rubika.ir/" + first[1:] if is_username else first
-            pending_channel_link[sender] = link
-            call("joinChannelByLink", link=link)   # \u0645\u0645\u06a9\u0646 \u0627\u0633\u062a \u062f\u0631 Bot API \u067e\u0634\u062a\u06cc\u0628\u0627\u0646\u06cc \u0646\u0634\u0648\u062f
-            return send(chat_id, "\u0644\u06cc\u0646\u06a9 \u062b\u0628\u062a \u0634\u062f. \u062d\u0627\u0644\u0627 \u06cc\u06a9 \u067e\u0633\u062a \u0627\u0632 \u0647\u0645\u0627\u0646 \u06a9\u0627\u0646\u0627\u0644 \u0631\u0627 \u0628\u0631\u0627\u06cc \u0645\u0646 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f \u062a\u0627 \u0634\u0646\u0627\u0633\u0647\u200c\u06cc \u06a9\u0627\u0646\u0627\u0644 \u0631\u0627 \u0628\u06af\u06cc\u0631\u0645.\n"
-                                 "(\u0627\u06af\u0631 \u0631\u0628\u0627\u062a \u062e\u0648\u062f\u0634 \u0639\u0636\u0648 \u0646\u0634\u062f\u060c \u0622\u0646 \u0631\u0627 \u0627\u062f\u0645\u06cc\u0646 \u06a9\u0627\u0646\u0627\u0644 \u06a9\u0646\u06cc\u062f.)")
+    if forwarded and sender in pending_channel_link:
+
+        guid = forwarded.get("from_chat_id")
+
+        if not guid:
+
+            return send(
+                chat_id,
+                "❌ شناسه کانال از پیام فورواردشده دریافت نشد."
+            )
+
+        link = pending_channel_link.pop(sender)
+
+        db.execute(
+            """
+            INSERT OR REPLACE INTO channels
+            (guid, link)
+            VALUES (?, ?)
+            """,
+            (guid, link)
+        )
+
+        db_commit()
+
+        log.info(
+            "CHANNEL SAVED | guid=%s | link=%s",
+            guid,
+            link
+        )
+
+        return send(
+            chat_id,
+            "✅ کانال ثبت شد.\n\n"
+            "مطمئن شوید ربات در کانال دسترسی ادمین دارد."
+        )
+
+    # -------------------------------------------------
+    # POST TEXT
+    # -------------------------------------------------
+
+    if mode == "await_post_text" and text:
+
+        if text.startswith("/"):
+
+            return
+
+        admin_state[sender] = {
+
+            "mode": "await_song_link",
+
+            "sid": state["sid"],
+
+            "text": text
+
+        }
+
+        return send(
+            chat_id,
+            "✅ متن پست ذخیره شد.\n\n"
+            "🔗 حالا لینک اختصاصی همین آهنگ را ارسال کنید:\n\n"
+            + song_link(state["sid"])
+        )
+
+    # -------------------------------------------------
+    # VERIFY SONG LINK
+    # -------------------------------------------------
+
+    if mode == "await_song_link" and text:
+
+        match = re.search(
+            r"song_(\d+)",
+            text
+        )
+
+        if not match or match.group(1) != str(state["sid"]):
+
+            return send(
+                chat_id,
+                "❌ لینک اشتباه است.\n"
+                "لینک همین آهنگ را ارسال کنید."
+            )
+
+        state["mode"] = "await_confirm"
+
+        admin_state[sender] = state
+
+        buttons = keypad([
+
+            [
+
+                action_button(
+                    f"adm_post_{state['sid']}",
+                    "✅ تأیید نهایی"
+                ),
+
+                action_button(
+                    "adm_cancel",
+                    "❌ لغو"
+                )
+
+            ]
+
+        ])
+
+        return send(
+            chat_id,
+            "📋 پیش‌نمایش پست:\n\n"
+            f"{state['text']}\n\n"
+            f"@{BOT_USERNAME}\n\n"
+            "آیا انتشار را تأیید می‌کنید؟",
+            buttons
+        )
+
+    # -------------------------------------------------
+    # ADD CHANNEL
+    # -------------------------------------------------
+
+    if mode == "await_channel" and text:
+
+        first = text.split()[0]
+
+        if first.startswith("@"):
+
+            link = "https://rubika.ir/" + first[1:]
+
+        elif (
+            "rubika.ir/" in first
+            or "rubika.me/" in first
+        ):
+
+            link = first
+
+        else:
+
+            return send(
+                chat_id,
+                "❌ لینک یا آیدی کانال معتبر نیست."
+            )
+
+        pending_channel_link[sender] = link
+
+        admin_state.pop(sender, None)
+
+        return send(
+            chat_id,
+            "✅ لینک دریافت شد.\n\n"
+            "حالا یک پست از همان کانال برای ربات فوروارد کنید.\n\n"
+            "ربات باید در کانال ادمین باشد."
+        )
+
+    # -------------------------------------------------
+    # COMMANDS
+    # -------------------------------------------------
 
     if text == "/stats":
+
         return stats(chat_id)
+
     if text == "/channels":
-        return send(chat_id, "\n".join(f"{g} | {l}" for g, l in channels()) or "\u06a9\u0627\u0646\u0627\u0644\u06cc \u062b\u0628\u062a \u0646\u0634\u062f\u0647.")
+
+        return channel_list(chat_id)
+
     if text.startswith("/delchannel "):
-        db.execute("DELETE FROM channels WHERE guid=?", (text.split()[1],))
-        db.commit()
-        return send(chat_id, "\u062d\u0630\u0641 \u0634\u062f.")
+
+        guid = text.split(maxsplit=1)[1].strip()
+
+        db.execute(
+            "DELETE FROM channels WHERE guid=?",
+            (guid,)
+        )
+
+        db_commit()
+
+        return send(chat_id, "✅ کانال حذف شد.")
+
     if text.startswith("/del "):
-        db.execute("DELETE FROM songs WHERE id=?", (text.split()[1],))
-        db.commit()
-        return send(chat_id, "\u0622\u0647\u0646\u06af \u062d\u0630\u0641 \u0634\u062f.")
+
+        song_id = text.split(maxsplit=1)[1].strip()
+
+        if not song_id.isdigit():
+
+            return send(chat_id, "❌ شناسه آهنگ معتبر نیست.")
+
+        db.execute(
+            "DELETE FROM songs WHERE id=?",
+            (song_id,)
+        )
+
+        db_commit()
+
+        return send(chat_id, "✅ آهنگ حذف شد.")
+
     return None
 
 
-def handle_message(m, chat_id):
-    sender = m.get("sender_id", chat_id)
-    text = (m.get("text") or "").strip()
-    db.execute("INSERT OR IGNORE INTO users VALUES(?,?)", (sender, int(time.time())))
-    db.commit()
+# =====================================================
+# BUTTON ACTIONS
+# =====================================================
 
-    # \u0641\u0634\u0631\u062f\u0646 \u062f\u06a9\u0645\u0647\u200c\u06cc \u0634\u06cc\u0634\u0647\u200c\u0627\u06cc \u0645\u0645\u06a9\u0646 \u0627\u0633\u062a \u0628\u0647 \u0634\u06a9\u0644 \u067e\u06cc\u0627\u0645 \u0639\u0627\u062f\u06cc \u0628\u0627 aux_data.button_id \u0628\u0631\u0633\u062f
-    aux = m.get("aux_data") or {}
-    if aux.get("button_id"):
-        print("BUTTON (message):", aux.get("button_id"), "from", sender)
-        return handle_button({"aux_data": aux, "sender_id": sender}, chat_id)
+def handle_action(action, chat_id, sender):
 
-    bid = BTN_BY_CHAT.get(chat_id, {}).get(text) or GLOBAL_BTN.get(text)
-    if bid:
-        print("BUTTON (keyboard):", bid, "from", sender, flush=True)
-        return handle_button({"aux_data": {"button_id": bid}, "sender_id": sender}, chat_id)
+    log.info(
+        "BUTTON RECEIVED | action=%s | sender=%s",
+        action,
+        sender
+    )
+
+    # -------------------------------------------------
+    # ADMIN ACTIONS
+    # -------------------------------------------------
+
+    if action.startswith("adm_"):
+
+        if not is_admin(sender):
+
+            log.warning(
+                "UNAUTHORIZED BUTTON | sender=%s | action=%s",
+                sender,
+                action
+            )
+
+            return
+
+        if action == "adm_add":
+
+            admin_state[sender] = {
+                "mode": "await_add"
+            }
+
+            return send(
+                chat_id,
+                "➕ آهنگ را ارسال یا فوروارد کنید.\n\n"
+                "برای تعیین نام و خواننده در کپشن بنویسید:\n"
+                "اسم آهنگ | خواننده"
+            )
+
+        if action == "adm_upload":
+
+            admin_state[sender] = {
+                "mode": "await_upload"
+            }
+
+            return send(
+                chat_id,
+                "🚀 آهنگ موردنظر را ارسال یا فوروارد کنید."
+            )
+
+        if action == "adm_stats":
+
+            return stats(chat_id)
+
+        if action == "adm_channels":
+
+            return channel_list(chat_id)
+
+        if action == "adm_addch":
+
+            admin_state[sender] = {
+                "mode": "await_channel"
+            }
+
+            return send(
+                chat_id,
+                "📢 لینک یا آیدی کانال را ارسال کنید.\n\n"
+                "مثال:\n"
+                "@mychannel"
+            )
+
+        if action == "adm_cancel":
+
+            admin_state.pop(sender, None)
+
+            return send(
+                chat_id,
+                "❌ عملیات لغو شد."
+            )
+
+        if action.startswith("adm_post_"):
+
+            song_id = action[len("adm_post_"):]
+
+            state = admin_state.get(sender) or {}
+
+            if (
+                state.get("mode") != "await_confirm"
+                or str(state.get("sid")) != song_id
+            ):
+
+                return send(
+                    chat_id,
+                    "❌ درخواست منقضی شده است.\n"
+                    "دوباره از پنل شروع کنید."
+                )
+
+            if not channels():
+
+                return send(
+                    chat_id,
+                    "❌ هیچ کانالی ثبت نشده است."
+                )
+
+            count = post_to_channels(
+                song_id,
+                state.get("text", "") + f"\n\n@{BOT_USERNAME}"
+            )
+
+            admin_state.pop(sender, None)
+
+            return send(
+                chat_id,
+                f"📢 نتیجه انتشار:\n\n"
+                f"✅ انتشار موفق در {count} کانال."
+                if count
+                else
+                "❌ انتشار در هیچ کانالی موفق نبود."
+            )
+
+        return
+
+    # -------------------------------------------------
+    # JOIN CONFIRMATION
+    # -------------------------------------------------
+
+    if action.startswith("joined_song_"):
+
+        payload = action[len("joined_"):]
+
+        song_id = payload[5:]
+
+        if not song_id.isdigit():
+
+            return
+
+        if is_member(sender):
+
+            return send_song(
+                chat_id,
+                song_id
+            )
+
+        return send(
+            chat_id,
+            "❌ هنوز عضو تمام کانال‌ها نشده‌اید.\n\n"
+            "ابتدا عضو شوید و دوباره تأیید کنید."
+        )
+
+
+# =====================================================
+# START PAYLOAD
+# =====================================================
+
+def process_start(chat_id, sender, payload):
+
+    log.info(
+        "START | sender=%s | payload=%s",
+        sender,
+        payload
+    )
+
+    if payload.startswith("song_"):
+
+        return deliver(
+            chat_id,
+            sender,
+            payload
+        )
+
+    if payload.startswith("adm_"):
+
+        return handle_action(
+            payload,
+            chat_id,
+            sender
+        )
+
+    if payload.startswith("joined_song_"):
+
+        return handle_action(
+            payload,
+            chat_id,
+            sender
+        )
+
+    if payload == "":
+
+        if is_admin(sender):
+
+            return admin_panel(chat_id)
+
+        return send(
+            chat_id,
+            "سلام 👋 به AHNG MUSIC خوش آمدید.\n\n"
+            "🎵 برای دریافت آهنگ از لینک اختصاصی آهنگ‌ها استفاده کنید."
+        )
+
+
+# =====================================================
+# MESSAGE HANDLER
+# =====================================================
+
+def handle_message(message, chat_id):
+
+    if not isinstance(message, dict):
+
+        return
+
+    sender = message.get("sender_id", chat_id)
+
+    text = (
+        message.get("text") or ""
+    ).strip()
+
+    if not sender:
+
+        return
+
+    # SAVE USER
+
+    db.execute(
+        """
+        INSERT OR IGNORE INTO users
+        (guid, joined_at)
+        VALUES (?, ?)
+        """,
+        (sender, int(time.time()))
+    )
+
+    db_commit()
+
+    log.info(
+        "MESSAGE | sender=%s | text=%s",
+        sender,
+        text[:200]
+    )
+
+    # MY ID - AVAILABLE TO EVERYONE
 
     if text == "/myid":
-        return send(chat_id, f"guid \u0634\u0645\u0627:\n{sender}")
 
-    if sender in ADMINS and handle_admin(m, chat_id, sender, text) is not None:
-        return
+        return send(
+            chat_id,
+            f"🆔 شناسه شما:\n{sender}"
+        )
 
-    if text == "/panel" and is_admin(sender):
-        return admin_panel(chat_id)
+    # ADMIN MESSAGES
+
+    if is_admin(sender):
+
+        result = handle_admin(
+            message,
+            chat_id,
+            sender,
+            text
+        )
+
+        if result is not None:
+
+            return result
+
+    # START
 
     if text.startswith("/start"):
-        parts = text.split()
-        payload = parts[1] if len(parts) > 1 else (m.get("aux_data") or {}).get("start_id", "")
-        if payload:
-            return deliver(chat_id, sender, payload)
+
+        parts = text.split(maxsplit=1)
+
+        payload = (
+            parts[1].strip()
+            if len(parts) > 1
+            else ""
+        )
+
+        return process_start(
+            chat_id,
+            sender,
+            payload
+        )
+
+    # ADMIN PANEL
+
+    if text == "/panel":
+
         if is_admin(sender):
+
             return admin_panel(chat_id)
-        return send(chat_id, "\u0633\u0644\u0627\u0645 \U0001f44b \u0628\u0647 AHNG MUSIC \u062e\u0648\u0634 \u0622\u0645\u062f\u06cc\u062f.\n\u0628\u0631\u0627\u06cc \u062f\u0631\u06cc\u0627\u0641\u062a \u0622\u0647\u0646\u06af \u0627\u0632 \u062f\u06a9\u0645\u0647\u200c\u06cc \u062f\u0627\u0646\u0644\u0648\u062f \u0632\u06cc\u0631 \u067e\u0633\u062a\u200c\u0647\u0627\u06cc \u06a9\u0627\u0646\u0627\u0644 \u0627\u0633\u062a\u0641\u0627\u062f\u0647 \u06a9\u0646\u06cc\u062f.")
 
-
-def handle_button(inline, chat_id):
-    bid = (inline.get("aux_data") or {}).get("button_id") or inline.get("button_id") or ""
-    sender = inline.get("sender_id", chat_id)
-
-    # \u062f\u06a9\u0645\u0647\u200c\u0647\u0627\u06cc \u067e\u0646\u0644 \u0645\u062f\u06cc\u0631: \u0641\u0642\u0637 \u0628\u0631\u0627\u06cc \u0627\u062f\u0645\u06cc\u0646\u200c\u0647\u0627
-    if bid.startswith("adm:"):
-        if not is_admin(sender):
-            print("IGNORED admin button, sender is not in ADMINS:", sender, flush=True)
-            return
-        if bid == "adm:add":
-            admin_state[sender] = {"mode": "await_song_add"}
-            send(chat_id, "\u2795 \u0622\u0647\u0646\u06af \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f \u06cc\u0627 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f.\n"
-                          "(\u062f\u0631 \u06a9\u067e\u0634\u0646 \u0645\u06cc\u200c\u062a\u0648\u0627\u0646\u06cc\u062f \u0628\u0646\u0648\u06cc\u0633\u06cc\u062f: \u0627\u0633\u0645 \u0622\u0647\u0646\u06af | \u062e\u0648\u0627\u0646\u0646\u062f\u0647)\n"
-                          "\u0628\u0639\u062f \u0627\u0632 \u0630\u062e\u06cc\u0631\u0647\u060c \u0644\u06cc\u0646\u06a9 \u0627\u062e\u062a\u0635\u0627\u0635\u06cc \u0622\u0647\u0646\u06af \u0631\u0627 \u0645\u06cc\u200c\u06af\u06cc\u0631\u06cc\u062f.")
-        elif bid == "adm:upload":
-            admin_state[sender] = {"mode": "await_song_upload"}
-            send(chat_id, "\U0001f680 \u0622\u0647\u0646\u06af \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f \u06cc\u0627 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f.\n"
-                          "(\u062f\u0631 \u06a9\u067e\u0634\u0646 \u0645\u06cc\u200c\u062a\u0648\u0627\u0646\u06cc\u062f \u0628\u0646\u0648\u06cc\u0633\u06cc\u062f: \u0627\u0633\u0645 \u0622\u0647\u0646\u06af | \u062e\u0648\u0627\u0646\u0646\u062f\u0647)")
-        elif bid.startswith("adm:text:"):
-            admin_state[sender] = {"mode": "await_text", "sid": bid[9:]}
-            send(chat_id, "\u270d\ufe0f \u0645\u062a\u0646 \u067e\u0633\u062a \u0631\u0627 \u0628\u0646\u0648\u06cc\u0633\u06cc\u062f \u0648 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f:")
-        elif bid.startswith("adm:post:"):
-            st = admin_state.get(sender) or {}
-            sid = bid[9:]
-            if st.get("mode") != "await_confirm" or str(st.get("sid")) != sid:
-                send(chat_id, "\u0627\u06cc\u0646 \u062f\u0631\u062e\u0648\u0627\u0633\u062a \u0645\u0646\u0642\u0636\u06cc \u0634\u062f\u0647. \u062f\u0648\u0628\u0627\u0631\u0647 \u0627\u0632 \u067e\u0646\u0644 \u0634\u0631\u0648\u0639 \u06a9\u0646\u06cc\u062f: /panel")
-            elif not channels():
-                send(chat_id, "\u06a9\u0627\u0646\u0627\u0644\u06cc \u062b\u0628\u062a \u0646\u0634\u062f\u0647. \u0627\u0648\u0644 \xab\U0001f4e2 \u062b\u0628\u062a \u06a9\u0627\u0646\u0627\u0644\xbb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f.")
-            else:
-                n = post_to_channels(sid, f"{st.get('text', '')}\n\n@{BOT_USERNAME}")
-                admin_state.pop(sender, None)
-                send(chat_id, f"\u2705 \u0645\u0646\u062a\u0634\u0631 \u0634\u062f \u062f\u0631 {n} \u06a9\u0627\u0646\u0627\u0644." if n else "\u274c \u0627\u0631\u0633\u0627\u0644 \u0628\u0647 \u06a9\u0627\u0646\u0627\u0644 \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f. \u0631\u0628\u0627\u062a \u0628\u0627\u06cc\u062f \u0627\u062f\u0645\u06cc\u0646 \u06a9\u0627\u0646\u0627\u0644 \u0628\u0627\u0634\u062f.")
-        elif bid == "adm:cancel":
-            admin_state.pop(sender, None)
-            send(chat_id, "\u0644\u063a\u0648 \u0634\u062f. \u0628\u0631\u0627\u06cc \u067e\u0646\u0644: /panel")
-        elif bid == "adm:addch":
-            send(chat_id, "\U0001f4e2 \u0644\u06cc\u0646\u06a9 \u06cc\u0627 \u0622\u06cc\u062f\u06cc \u06a9\u0627\u0646\u0627\u0644 \u0631\u0627 \u0628\u0641\u0631\u0633\u062a\u06cc\u062f (\u0645\u062b\u0644 @mychannel).\n"
-                          "\u0628\u0639\u062f \u06cc\u06a9 \u067e\u0633\u062a \u0627\u0632 \u0647\u0645\u0627\u0646 \u06a9\u0627\u0646\u0627\u0644 \u0631\u0627 \u0628\u0631\u0627\u06cc \u0645\u0646 \u0641\u0648\u0631\u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f.\n"
-                          "\u0631\u0628\u0627\u062a \u0628\u0627\u06cc\u062f \u0627\u062f\u0645\u06cc\u0646 \u06a9\u0627\u0646\u0627\u0644 \u0628\u0627\u0634\u062f.")
-        elif bid == "adm:stats":
-            stats(chat_id)
-        elif bid == "adm:channels":
-            send(chat_id, "\n".join(f"{g} | {l}" for g, l in channels()) or "\u06a9\u0627\u0646\u0627\u0644\u06cc \u062b\u0628\u062a \u0646\u0634\u062f\u0647.")
         return
 
-    if bid.startswith("joined:"):
-        payload = bid[7:]
-        if is_member(sender):
-            send_song(chat_id, payload[5:])
-        else:
-            send(chat_id, "\u0647\u0646\u0648\u0632 \u0639\u0636\u0648 \u0646\u06cc\u0633\u062a\u06cc\u062f \u274c \u0627\u0628\u062a\u062f\u0627 \u062f\u0631 \u06a9\u0627\u0646\u0627\u0644 \u0639\u0636\u0648 \u0634\u0648\u06cc\u062f \u0648 \u062f\u0648\u0628\u0627\u0631\u0647 \xab\u062a\u0623\u06cc\u06cc\u062f \u0639\u0636\u0648\u06cc\u062a\xbb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f.")
+    # ADMIN COMMANDS
+
+    if is_admin(sender):
+
+        if text.startswith(("/stats", "/channels", "/del ", "/delchannel ")):
+
+            return handle_admin(
+                message,
+                chat_id,
+                sender,
+                text
+            )
 
 
+# =====================================================
+# UPDATE PROCESSOR
+# =====================================================
 
-def ukey(u):
-    return json.dumps(u, sort_keys=True, ensure_ascii=False)
+def process_update(update):
 
+    if not isinstance(update, dict):
+
+        return
+
+    update_type = update.get("type")
+
+    chat_id = update.get("chat_id")
+
+    if update_type == "RemovedMessage":
+
+        return
+
+    if update_type == "NewMessage":
+
+        message = update.get("new_message") or {}
+
+        try:
+
+            handle_message(
+                message,
+                chat_id
+            )
+
+        except Exception:
+
+            log.exception(
+                "MESSAGE HANDLER ERROR"
+            )
+
+        return
+
+    # Other update types
+
+    if update.get("inline_message"):
+
+        log.info(
+            "INLINE UPDATE RECEIVED: %s",
+            update["inline_message"]
+        )
+
+        inline = update["inline_message"]
+
+        sender = inline.get("sender_id")
+
+        if sender and inline.get("aux_data"):
+
+            action = (
+                inline["aux_data"].get("button_id")
+            )
+
+            if action:
+
+                handle_action(
+                    action,
+                    inline.get("chat_id") or chat_id,
+                    sender
+                )
+
+        return
+
+    log.info(
+        "OTHER UPDATE: %s",
+        update
+    )
+
+
+# =====================================================
+# MAIN POLLING
+# =====================================================
 
 def main():
+
     if not BOT_TOKEN:
-        raise SystemExit("BOT_TOKEN تنظیم نشده است.")
-    pool = ThreadPoolExecutor(2)
+
+        raise SystemExit(
+            "BOT_TOKEN تنظیم نشده است."
+        )
+
     offset = None
-    prev = None          # شمارش آپدیت‌های دور قبلِ (بدون offset)
-    beat = 0
-    print("AHNG MUSIC bot started... VERSION 6 (keyboard buttons)", flush=True)
-    admin_panel(None)      # فقط ثبت دکمه‌های ثابت پنل
+
+    log.info(
+        "AHNG MUSIC STARTED | BOT=%s",
+        BOT_USERNAME
+    )
+
+    log.info(
+        "ADMINS=%s",
+        len(ADMINS)
+    )
+
     while True:
-        # ---- الف) دکمه‌های شیشه‌ای: بدون offset گرفته می‌شوند، فقط موارد «تازه» اجرا می‌شوند ----
-        d = {"limit": 50}
-        if offset:
-            d["offset_id"] = offset
-        fa = pool.submit(call, "getUpdates", limit=100)
-        fb = pool.submit(call, "getUpdates", **d)
-        r = fa.result()
-        if r.get("status") not in (None, "OK"):
-            print("getUpdates (no offset) answer:", str(r)[:300], flush=True)
-        ups = (r.get("data") or {}).get("updates", []) or []
-        cur = Counter(ukey(u) for u in ups)
-        if prev is not None:
-            fresh = cur - prev          # فقط آنچه از دور قبل اضافه شده
-            for u in ups:
-                k = ukey(u)
-                if fresh.get(k, 0) <= 0:
-                    continue
-                if u.get("inline_message"):
-                    fresh[k] -= 1
-                    im = u["inline_message"]
-                    print("BUTTON (inline):", str(im)[:300], flush=True)
-                    try:
-                        handle_button(im, im.get("chat_id") or u.get("chat_id"))
-                    except Exception as e:
-                        print("button handler error:", e, flush=True)
-                elif u.get("type") not in ("NewMessage", "RemovedMessage"):
-                    fresh[k] -= 1
-                    print("UPDATE:", str(u)[:300], flush=True)
-        prev = cur
 
-        # ---- ب) پیام‌های عادی: با offset ----
-        r2 = fb.result()
-        data = r2.get("data") or {}
-        if data.get("next_offset_id"):
-            offset = data["next_offset_id"]
-        for u in data.get("updates", []) or []:
-            if u.get("type") != "NewMessage":
-                if u.get("type") != "RemovedMessage":
-                    print("RAW(offset):", str(u)[:400], flush=True)
+        try:
+
+            params = {
+                "limit": 100
+            }
+
+            if offset:
+
+                params["offset_id"] = offset
+
+            result = call(
+                "getUpdates",
+                **params
+            )
+
+            if not result:
+
+                time.sleep(2)
+
                 continue
-            print("MSG:", str(u.get("new_message"))[:300], flush=True)
-            try:
-                handle_message(u["new_message"], u.get("chat_id"))
-            except Exception as e:
-                print("handler error:", e, flush=True)
 
-        beat += 1
-        if beat % 200 == 0:
-            print("alive", flush=True)
-        time.sleep(0.3)
+            if result.get("status") not in (None, "OK"):
 
+                log.error(
+                    "POLLING ERROR: %s",
+                    result
+                )
+
+                time.sleep(3)
+
+                continue
+
+            data = result.get("data") or {}
+
+            updates = data.get("updates") or []
+
+            log.info(
+                "UPDATES RECEIVED: %s",
+                len(updates)
+            )
+
+            for update in updates:
+
+                try:
+
+                    process_update(update)
+
+                except Exception:
+
+                    log.exception(
+                        "UPDATE PROCESSING ERROR"
+                    )
+
+            next_offset = data.get("next_offset_id")
+
+            if next_offset:
+
+                offset = next_offset
+
+            time.sleep(POLL_INTERVAL)
+
+        except KeyboardInterrupt:
+
+            log.info("BOT STOPPED")
+
+            break
+
+        except Exception:
+
+            log.exception(
+                "MAIN LOOP ERROR"
+            )
+
+            time.sleep(3)
+
+
+# =====================================================
+# RUN
+# =====================================================
 
 if __name__ == "__main__":
+
     main()
