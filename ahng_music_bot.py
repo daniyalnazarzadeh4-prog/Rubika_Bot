@@ -1,656 +1,607 @@
-# -*- کدگذاری: utf-8 -*-
-«»»
-AHNG MUSIC - Ø±Ø¨Ø§Øª Ù…ÙˆØ²ÛŒÚ© Ø±ÙˆØ¨ÛŒÚ©Ø§ (Rubika Bot API v3)
+# -*- coding: utf-8 -*-
+"""
+DeniUp (دنی‌آپ) - ربات مدیریت گروه روبیکا
+کتابخانه: rubpy   ->   pip install rubpy
+اجرا:     python deniup_bot.py
+بار اول از شما شماره بات (+989306720427) و کد تایید را می‌خواهد.
+"""
+import re
+import json
+import time
+import asyncio
+import random
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from collections import defaultdict, deque
 
-Ø§Ø¬Ø±Ø§:
-    BOT_TOKEN=xxxx PUBLIC_URL=https://Ø¢Ø¯Ø±Ø³-Ø¹Ù…ÙˆÙ…ÛŒ-Ø³Ø±ÙˆØ±-Ø´Ù…Ø§ پایتون ahng_music_bot.py
+from rubpy import Client, filters
+from rubpy.types import Update
 
-Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ (ساده):
-    Ø±ÙˆØ®ÛŒÚ©Ø§ ©Ù„ÛŒÚ© Ø§ÛŒÙ† ØÚ©Ù…Ù‡â€ŒÙ‡Ø§ Ø±Ø§ Ù ØˆØ·ØØ² (ReceiveInlineMessage) Ø¨Ø±Ø§ÛŒ Ø±Ø¨Ø§Øª Ù…ÛŒâ€ŒÙ Ø±Ø³ØªØ¯ØŒ
-    Ù†Ù‡ Ø§Ø² Ø±Ø§Ù‡ getUpdates. Ø¨Ø±Ø§ÛŒ Ù‡Ù…ÛŒÙ† Ø±Ø¨Ø§Øª ÛŒÚ© Ø³Ø±ÙˆØ±Ú©ÙˆÚ†Ú©. Ø¢Ø¯Ø±Ø³Ø´ Ø±Ø§
-    Ø¨Ø§ updateBotEndpoints Ø¨Ù‡ Ø±ÙˆØ¨ÛŒÚ©Ø§ Ù…ÛŒâ€ŒØ¯Ù‡ØØ¯. Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ú©Ø§Ø± Ø¨Ø§ÛŒØ¯ PUBLIC_URL (Ø¢Ø¯Ø±Ø³ https Ø¹Ù…ÙˆÙ…ÛŒ
-    Ø³Ø±ÙˆØ±/Ù‡Ø§Ø³Øª) ØªÙ†Ø¸ÛŒÙ… Ø´Ø¯Ù‡ Ø¨Ø§Ø´Ø¯. Ø§Ú¯Ø± ØªÙ†Ø¸ÛŒÙ… Ù†Ø¨Ø§Ø´Ø¯ ÛŒØ§Ø« ØØ§Ù„Øª Ù‚Ø¯ÛŒÙ…ÛŒ
-    (Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ù„ÛŒÙ†Ú© + ?start=) Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±ØØØ¯.
+# ============================ تنظیمات ============================
+SESSION_NAME = "deniup"
+BOT_NAME = "دنی‌آپ"
+BOT_ACCOUNT_PHONE = "+989306720427"
+ADMIN_PHONE = "09921122540"          # فقط برای اطلاع؛ شناسایی ادمین با GUID است
+ADMIN_GUIDS = set()                  # GUID ادمین را اینجا بگذار (دستور /myguid در پیوی بات)
 
-ØØÚ©Ù… Ù„ÛŒÙ†Ú© Ø§Ø³Øª (Ø¨Ø§Ø² Ú©Ø±Ø¯Ù† Ø±Ø¨Ø§Øª Ø¨Ø§ ?start=song_N)ØŒ
-Ú†ÙˆÙ† Ø¯Ø± Ú©Ø§Ù†Ø§Ù„ Ù„Ø§Ø²Ù… Ø§Ø³Øª Ú©Ø§Ø±Ø¨Ø± ÙˆØ§Ø±Ø¯ Ø±Ø¨Ø§Øª.
-«»»
+SPAM_LIMIT = 5        # بیش از این تعداد پیام ...
+SPAM_WINDOW = 6       # ... در این تعداد ثانیه = اسپم
+SPAM_MAX_WARNS = 3    # بعد از این تعداد اخطار، کاربر از گروه حذف می‌شود
+STATS_FILE = "deniup_stats.json"
+PROMO_FILE = "deniup_promo.json"
+WARNS_FILE = "deniup_warns.json"     # اخطارهای مالک گروه (ماندگار)
+OWNER_MAX_WARNS = 3                  # بعد از این تعداد اخطار مالک، عضو از گروه حذف می‌شود
+BAN_WORDS = ("بن", "/ban", "ban")
+WARN_WORDS = ("اخطار", "/warn", "warn")
+UNWARN_WORDS = ("حذف اخطار", "/unwarn")
+PROMOTE_WORDS = ("ارتقا", "ارتقاع", "ارتقاء", "ادمین", "/promote")
+DEMOTE_WORDS = ("عزل", "عزل ادمین", "/demote")
+MUTE_WORDS = ("سکوت", "/mute")
+UNMUTE_WORDS = ("رفع سکوت", "/unmute")
+MUTE_HOURS = 24                      # مدت سکوت
+MUTE_FILE = "deniup_mutes.json"
+# دسترسی‌هایی که ادمین جدید می‌گیرد (SetAdmin عمداً نیست تا ادمین‌ها نتوانند ادمین بسازند)
+ADMIN_ACCESS = ["PinMessages", "DeleteGlobalAllMessages", "BanMember", "SetJoinLink", "ChangeInfo", "ViewMembers", "ViewAdmins"]
+TZ = ZoneInfo("Asia/Tehran")     # ساعت شلوغی بر اساس وقت ایران
+PROMO_CHANNEL = "@AhngOfficial"
+PROMO_MIN_DATA = 30              # حداقل پیام ثبت‌شده تا ساعت شلوغی گروه محاسبه شود
+PROMO_DEFAULT_HOUR = 21          # ساعت پیش‌فرض تا وقتی داده کافی نیست
+PROMO_ACTIVE_MSGS = 3            # حداقل پیام در ۱۰ دقیقه اخیر تا گروه «شلوغ» حساب شود
+ACCEPT_WORDS = ("قبول دارم", "قبول", "/accept")
+CHECK_WORDS = ("عضو شدم", "عضو شدم ✅", "✅ عضو شدم", "/check", "بررسی")
+MEMBER_CACHE_SEC = 600           # نتیجه عضویت تاییدشده تا این مدت کش می‌شود
+FORCE_JOIN_TEXT = (
+    "📢 عضویت اجباری\n\n"
+    "برای استفاده از ربات، اول باید در کانال ما عضو بشی 👇\n"
+    "👉 " + PROMO_CHANNEL + "\n\n"
+    "بعد از عضویت، بنویس: «عضو شدم» ✅"
+)
 
-وارد کردن سیستم عامل
-واردات مجدد
-وارد کردن json
-زمان واردات
-وارد کردن هش‌لیب
-وارد کردن sqlite3
-ورود به سیستم واردات
-وارد کردن نخ
-درخواست‌های واردات
-از http.server، BaseHTTPRequestHandler و ThreadingHTTPServer را وارد کنید.
-از urllib.parse import quote
+PROMO_MESSAGES = [
+    "🎵✨ عاشق آهنگ‌های خاص و دلنشینی؟\nبهترین‌ها رو تو کانال ما پیدا کن 👇\n📢 {ch}",
+    "🌹 یه استراحت کوتاه، یه آهنگ قشنگ! 🎧\nهر روز تازه‌ترین آهنگ‌ها فقط تو 👈 {ch}",
+    "💎 اگه آهنگ خوب دوست داری، جات اینجاست!\nعضو شو و هر روز لذت ببر 🎶\n📲 {ch}",
+    "🔥 داغ‌ترین و جدیدترین آهنگ‌ها منتظرته!\nهمین الان بپیوند 👇\n📢 {ch}",
+    "🎶 حال و هوات رو عوض کن با آهنگ‌های ناب 💫\nکانال رسمی ما: {ch}",
+]
 
-# =====================================================
-# ØªÙ†Ø¸ÛŒÙ…Ø§Øª
-# =====================================================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-BOT_USERNAME = "ahng_music_bot" # Ø¨Ø¯ÙˆÙ† @
-مدیران = {
-    x.strip()
-    برای x در os.getenv("ADMINS", "u0HbMCz07b206d47b6e01988bf7610cf").split(",")
-    اگر x.strip()
+RULES_TEXT = (
+    "📜 قوانین مهم — لطفاً حتماً بخوانید ⚠️\n\n"
+    "1️⃣ ربات برای مدیریت گروه شما (حذف لینک، آیدی و اسپم) فعالیت می‌کند.\n"
+    "2️⃣ ربات روزانه در ساعات شلوغ گروه، یک پیام تبلیغ کانال " + PROMO_CHANNEL + " ارسال می‌کند.\n"
+    "3️⃣ اگر نمی‌خواهید تبلیغ در گروه شما ارسال شود، باید ماهانه "
+    "۵۰ هزار تومان پرداخت کنید.\n"
+    "4️⃣ برای پرداخت و فعال‌سازی، به ادمین ربات پیام بدهید: " + ADMIN_PHONE + "\n\n"
+    "✅ اگر با قوانین موافقید بنویسید: «قبول دارم» تا ربات عضو گروه شما شود."
+)
+# ================================================================
+
+LINK_RE = re.compile(
+    r"(https?://|www\.|t\.me/|rubika\.ir/|rubika\.me/|telegram\.me/|"
+    r"instagram\.com/|wa\.me/|chat\.whatsapp\.com|\b[\w-]+\.(com|ir|me|org|net|info|xyz|link)\b)",
+    re.IGNORECASE,
+)
+ID_RE = re.compile(r"(?<![\w.])@[A-Za-z0-9_]{3,}")
+JOIN_LINK_RE = re.compile(r"rubika\.ir/(join[gc])/([A-Za-z0-9]+)", re.IGNORECASE)
+
+GREETINGS = {
+    "سلام": ["سلام عزیزم 🌹", "سلام، خوش اومدی 👋", "سلام! در خدمتم ✨"],
+    "خوبی": ["مرسی عزیزم، تو خوبی؟ 😊", "عالیم! شما چطوری؟ 🌟"],
+    "چطوری": ["عالیم، ممنون که پرسیدی 🌹", "خوبم خوبم، تو چطوری؟ 😍"],
 }
-DB_FILE = os.getenv("DB_FILE", "ahng.db")
-PUBLIC_URL = os.getenv("PUBLIC_URL", "")).strip().rstrip("/")
-پورت = int(os.getenv("پورت"، "8080"))
-API = f"https://botapi.rubika.ir/v3/{BOT_TOKEN}/"
-WEBHOOK_PATH = "/hook/" + hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:20]
-فاصله نظرسنجی = 0.4
-REQUEST_TIMEOUT = (5، 20)
-
-USE_INLINE = False # Ø§Ú¯Ø± ÙˆØ¨â€ŒÙ‡ÙˆÚ© Ø¨Ø§ Ù…ÙˆÙ Ù‚ÛŒØª Ø«Ø¨Øª Ø´Ø¯ True Ù…ÛŒâ€ņÚ
-قفل = threading.RLock()
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-ورود = logging.getLogger("AHNG")
-
-# =====================================================
-# Ø§Ø±ØªØ¨Ø§Ø· Ø¨Ø§ API
-# =====================================================
-جلسه = درخواست‌ها.جلسه()
-
-
-فراخوانی def(متد، **داده):
-    امتحان کنید:
-        r = session.post(API + method, json=data, timeout=REQUEST_TIMEOUT)
-        امتحان کنید:
-            نتیجه = r.json()
-        به جز ValueError:
-            log.error("API غیر JSON | %s | http=%s | %s", method, r.status_code, r.text[:200])
-            برگرداندن {}
-        اگر result.get("status") در (هیچکدام، "OK") نباشد:
-            log.error("خطای API | %s | %s", متد, str(result)[:300])
-        نتیجه بازگشتی
-    به جز استثنا به عنوان e:
-        log.error("درخواست خطا | %s | %s", متد, e)
-        برگرداندن {}
-
-
-def ok(نتیجه):
-    تابع ()return bool و تابع ()result.get("status", "OK") == "OK" را برمی‌گرداند.
-
-
-نام کاربری را شناسایی کنید():
-    """Ø¢ÛŒØ¯ÛŒ ÙˆØ§Ù‚Ø¹ÛŒ Ø±Ø¨Ø§Øª Ø±Ø§ Ø§Ø² Ø®ÙˆØ¯ Ø±ÙˆØ¨ÛŒÚ©Ø§ Ù…ÛŒâ€ŒÚ¯Û Ù„ÛŒÙ†Ú©â€ŒÙ‡Ø§ ØØªÙ…Ø§Ù‹ ØØØ±Ø³Øª Ø¨Ø§Ø´Ù†Ø¯."""
-    نام کاربری_ربات سراسری
-    res = فراخوانی("getMe")
-    data = res.get("data") یا {}
-    اگر isinstance(data.get("bot"), dict) باشد، در غیر این صورت داده را دریافت می‌کند. bot = data.get("bot")
-    uname = str(bot.get("username") or "").lstrip("@").strip()
-    اگر uname و uname.lower() != BOT_USERNAME.lower() باشد:
-        log.warning("BOT_USERNAME Ø¯Ø± Ú©Ø¯ %s Ø¨ÙˆØ¯ ÙˆÙ„ÛŒ Ø±Ø¨Ø§Øª ÙˆØ§Ù‚Ø¹ÛŒ %s Ø§Ø³ØªØŒ› Ø§Ø³ØªÙ Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯، BOT_USERNAME، نام نام)
-        نام کاربری_BOT = بدون نام
-    log.info("GETME | ok=%s | username=%s", bool(res), uname یا "?")
-
-
-# =====================================================
-# Ø¯ÛŒØªØ§Ø¨ÛŒØ³
-# =====================================================
-db = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
-db.executescript("""
-ایجاد جدول در صورت عدم وجود آهنگ‌ها (
-    افزایش خودکار کلید اصلی عدد صحیح شناسه
-    متن عنوان، متن هنرمند، شناسه فایل، متن
-    دانلودهای INTEGER DEFAULT 0، added_at INTEGER)؛
-ایجاد جدول اگر وجود نداشته باشد کاربران(راهنما متن کلید اصلی، join_at عدد صحیح)؛
-ایجاد جدول در صورت عدم وجود کانال‌ها (متن راهنما، کلید اصلی، متن پیوند)؛
-"")
-db.commit()
-
-admin_state = {} # guid Ø§Ø¯Ù…ÛŒÙ† -> Ù…Ø±ØÙ„Ù‡â€ŒÛŒ Ø¹Ù„ÛŒ
-pending_channel_link = {} # guid Ø¯Ù…ÛŒÙ† -> Ù„ÛŒÙ†Ú© Ú©ÙÙ†Ø§Ù„ÛŒ ©Ù‡ . Ø§Ø³Øª
-
-
-# =====================================================
-# Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§
-# =====================================================
-def bot_link(بار مفید):
-    return f"https://rubika.ir/{BOT_USERNAME}?start={quote(str(payload), safe='_')}"
-
-
-دکمه لینک (پیشنهاد، متن، آدرس اینترنتی):
-    return {"id": str(bid), "type": "Link", "button_text": text,
-            "button_link": {"type": "url", "link_url": url}}
-
-
-دکمه ساده (پیشنهاد، متن):
-    return {"id": str(bid), "type": "Simple", "button_text": text}
-
-
-دکمه عمل (عمل، متن):
-    """Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ Ø§Ø³ØªØŒ ÙˆÚ¯Ø±Ù†Ù‡ Ù„ÛŒÙ†Ú© ?start=."""
-    اگر USE_INLINE باشد:
-        بازگرداندن simple_button(action, text)
-    دکمه_پیوند_را_برگردانید(عمل، متن، لینک_ربات(عمل))
-
-
-صفحه کلید تعریف (ردیف‌ها):
-    return {"rows": [{"buttons": row} برای ردیف در ردیف‌ها]}
-
-
-ارسال def(chat_id, text, buttons=None):
-    اگر chat_id نباشد:
-        log.warning("ارسال لغو شد: chat_id Ø®Ø§Ù„ÛŒ Ø§Ø³Øª")
-        برگرداندن {}
-    d = {"chat_id": chat_id, "text": str(text)}
-    اگر دکمه‌ها:
-        d["inline_keypad"] = دکمه‌ها
-    res = call("sendMessage", **d)
-    اگر دکمه‌ها و نه ok(res):
-        log.error("ارسال با صفحه کلید ناموفق بود -> دوباره امتحان کردن بدون دکمه | %s", str(res)[:300])
-        res = call("sendMessage", chat_id=chat_id, text=str(text))
-    بازگرداندن اطلاعات
-
-
-تابع def send_file(chat_id, file_id, text, buttons=None):
-    d = {"شناسه_چت": شناسه_چت، "شناسه_فایل": شناسه_فایل، "متن": متن}
-    اگر دکمه‌ها:
-        d["inline_keypad"] = دکمه‌ها
-    res = فراخوانی("sendFile", **d)
-    اگر دکمه‌ها و نه ok(res):
-        log.error("ارسال فایل با صفحه کلید ناموفق بود -> تلاش مجدد بدون دکمه | %s", str(res)[:300])
-        res = call("sendFile", chat_id=chat_id, file_id=file_id, text=text)
-    بازگرداندن اطلاعات
-
-
-# =====================================================
-# Ú©Ø§Ù†Ø§Ù„â€ŒÙ‡Ø§ Ùˆ Ø¹Ø¶ÙˆÛŒØª Ø§ØØ¨Ø§Ø±ÛŒ
-# =====================================================
-کانال‌های تعریف‌شده():
-    return db.execute("SELECT guid, link FROM channels").fetchall()
-
-
-عضو_کاربر(راهنمای_کاربر):
-    """Ù‡Ø± Ø¨Ø§Ø± Ø§Ø² Ø±ÙˆØ¨ÛŒÚ©Ø§ Ù…ÛŒâ€ŒÙ¾Ø±Ø³Ø¯ (Ú©Ø´ Ù†Ù…ÛŒâ€ŒÚ©ÙØŒÚØØ³ï) Ú©Ù‡ Ø§Ø² Ú©Ø§Ù†Ø§Ù„ Ø®Ø§Ø±Ø¬ Ø´ÙˆØ¯ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ù‚Ù Ù„ Ù…ÛŒâ€ŒØ´ÙˆØ¯."""
-    اگر user_guid نباشد:
-        مقدار نادرست را برمی‌گرداند
-    برای راهنما، _ در channels():
-        res = call("getChatMember", chat_id=guid, user_id=user_guid)
-        status = str((res.get("data") or {}).get("status", "")).lower()
-        log.info("بررسی اعضا | کانال=%s | کاربر=%s | وضعیت=%s", guid, user_guid, status یا "?")
-        اگر وضعیت در ("عضو"، "خالق"، "مدیر"، "مالک") نباشد:
-            مقدار نادرست را برمی‌گرداند
-    بازگشت درست
-
-
-لیست_کانال_تعریف‌شده(شناسه_چت):
-    آیتم‌ها = کانال‌ها()
-    اگر موارد نباشند:
-        return send(chat_id, "ðŸ“ Ù‡Ù†ÙˆØ² Ú©Ø§Ù†Ø§Ù„ÛŒ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.")
-    متن = "ðŸ“‹ Ú©Ø§Ù†Ø§Ù„â€ŒÙ‡Ø§ÛŒ Ø«Ø¨Øªâ€ŒØ´Ø¯Ù‡:\n\n" + "\n".join(
-        تابع f"{i}. {g}\n{l}" برای i و (g و l) در enumerate(items, 1))
-    ارسال بازگشتی(chat_id, text)
-
-
-# =====================================================
-# Ø¢Ù‡Ù†Ú¯â€ŒÙ‡Ø§
-# =====================================================
-لینک_آهنگ_دف(شناسه_آهنگ):
-    return bot_link(f"song_{song_id}")
-
-
-def get_song(song_id):
-    return db.execute("SELECT title, artist, file_id FROM songs WHERE id=?", (song_id,)).fetchone()
-
-
-def send_song(chat_id, song_id):
-    آهنگ = get_song(song_id)
-    اگر آهنگ نباشد:
-        return send(chat_id, "â Œ Ø¢Ù‡Ù†Ú¯ Ù…ÙˆØ±Ø¯Ù†Ø¸Ø± Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.")
-    عنوان، هنرمند، file_id = آهنگ
-    res = call("sendFile", chat_id=chat_id, file_id=file_id,
-               text=f"ðŸŽµ {title}\nðŸŽ¤ {هنرمند}\n\n@{BOT_USERNAME}")
-    اگر مشکلی نیست (res):
-        db.execute("به‌روزرسانی آهنگ‌ها، تعداد دانلودها را تنظیم کن=دانلودها+1 WHERE id=?", (song_id,))
-        db.commit()
-        log.info("آهنگ ارسال شد | آهنگ=%s | چت=%s", song_id, chat_id)
-    بازگرداندن اطلاعات
-
-
-تابع `join_prompt` (شناسه چت، مقدار داده):
-    ردیف‌ها = [[link_button(f"channel_{i}", f"ðŸ“¢ Ø¹Ø¶ÙˆÛŒØª Ø¯Ø± Ú©Ø§Ù†Ø§Ù„ {i + 1}", لینک)]
-            برای i، (_، لینک) در enumerate(channels())]
-    rows.append([action_button(f"joined_{payload}", "âœ… Ø¹Ø¶Ùˆ Ø´Ø¯Ù…")])
-    send(chat_id, "ðŸ"' Ø¨Ø±Ø§ÛŒ ØØØ±ÛŒØ§Ù Ø¢Ù‡Ù†Ú¯ Ø§Ø¨ØªØ¯Ø§ Ø´ÙˆÛŒØ¯ØŒ Ø³Ù¾Ø³ Ø¹Ø¶Ùˆ Ø´Ø¯Ù…Â» Ø±Ø§ Ø¨Ø²Ù†ÛŒØ¯:",
-         صفحه کلید (ردیف ها))
-
-
-تحویل def(chat_id، user_guid، payload):
-    اگر payload.startswith("song_") نباشد:
-        بازگشت
-    song_id = payload[5:]
-    اگر song_id.isdigit() نباشد یا get_song(song_id) نباشد:
-        return send(chat_id, "â Œ Ø¢Ù‡Ù†Ú¯ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.")
-    اگر channels() و is_member(user_guid) نباشد:
-        تابع join_prompt(chat_id, payload) را برمی‌گرداند.
-    تابع send_song(chat_id, song_id) را برمی‌گرداند.
-
-
-def save_song(پیام، فرستنده):
-    f = message.get("file") یا {}
-    شناسه فایل = f.get("شناسه فایل")
-    اگر file_id نباشد:
-        هیچ کدام را برنگردانید
-    title = (f.get("file_name") or "Ø¢Ù‡Ù†Ú¯").rsplit(".", 1)[0]
-    هنرمند = "-"
-    عنوان = (message.get("text") یا "").strip()
-    اگر "|" در عنوان باشد:
-        t، a = [x.strip() برای x در caption.split("|", 1)]
-        عنوان، هنرمند = (t یا عنوان)، (a یا "-")
-    db.execute("وارد کردن آهنگ‌ها(عنوان، هنرمند، شناسه فایل، دانلودها، اضافه شده در) مقادیر(?,?,?,0,?)",
-               (عنوان، هنرمند، شناسه فایل، int(time.time())))
-    db.commit()
-    song_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-    log.info("آهنگ ذخیره شد | شناسه=%s | عنوان=%s | توسط=%s", شناسه آهنگ, عنوان, فرستنده)
-    بازگرداندن شناسه آهنگ، عنوان، هنرمند
-
-
-def final_post(chat_id, song_id, text):
-    """Ù¾Ø³Øª Ù†Ù‡Ø§ÛŒÛŒ: Ø¢Ù‡Ù†Ú¯ + Ù…ØªÙ† + Ø¯Ú©Ù…Ù‡â€ŒÛŒ Øª Ø¢Ù‡Ù†Ú¯ (Ù„ÛŒÙ†Ú© Ø¨Ù‡ Ø±Ø¨Ø§Øª)."""
-    آهنگ = get_song(song_id)
-    اگر آهنگ نباشد:
-        return send(chat_id, "â Œ Ø¢Ù‡Ù†Ú¯ Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯.")
-    kp = صفحه کلید([[link_button(f"song_{song_id}", "حذف آهنگ", song_link(song_id))]])
-    return send_file(chat_id, song[2], f"{text}\n\n@{BOT_USERNAME}", kp)
-
-
-# =====================================================
-# Ø¢Ù…Ø§Ø±
-# =====================================================
-آمار دف (چت_آیدی):
-    کاربران = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    آهنگ‌ها، دانلودها = db.execute(
-        "SELECT COUNT(*), COALESCE(SUM(downloads),0) FROM songs").fetchone()
-    بهترین = db.execute(
-        "انتخاب عنوان، دانلودها از آهنگ‌ها، مرتب‌سازی بر اساس دانلودها، محدودیت حجمی ۱۰").fetchall()
-    text = (f"ðŸ“Š Ø¢Ù…Ø§Ø± AHNG MUSIC\n\nðŸ'¤ Ú©Ø§Ø±Ø¨Ø±Ø§Ù†: {users}\nðŸŽµ
-            f"â¬‡ï¸ Ø¯Ø§Ù†Ù„ÙˆØ¯Ù‡Ø§: {downloads}\n\nðŸ † Û±Û° Ø¢Ù‡Ù†Ú¯ Ù¾Ø±ØØ¯Ø§Ù†ÙÙ":
-    متن += ("\n".join(f"{i}. {t} | {c} Ø¯Ø§Ù†Ù„ÙˆØ¯" برای i، (t، c) در enumerate(best، 1))
-             if best else "Ù‡Ù†ÙˆØ² Ø¢Ù‡Ù†Ú¯ÛŒ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.")
-    ارسال بازگشتی(chat_id, text)
-
-
-# =====================================================
-# Ù¾Ù†Ù„ Ù…Ø¯ÛŒØ±
-# =====================================================
-def is_admin(راهنما):
-    راهنمای بازگشت در بخش مدیریت
-
-
-شناسه‌ی چت (admin_panel):
-    ردیف‌ها = [
-        [action_button("adm_add", "حذف"), action_button("adm_upload", "حذف"")],
-        [action_button("adm_addch"، "ðŸ“¢ Ø«Ø¨Øª Ú©Ø§Ù†Ø§Ù„")، action_button("adm_stats"، "ðŸ"Š Ø¢Ù…Ø§Ø±")]،
-        [action_button("adm_channels", "ðŸ“‹ Ú©Ø§Ù†Ø§Ù„â€ŒÙ‡Ø§")],
-    ]
-    ارسال بازگشتی(chat_id,
-                "ðŸ› Ù¾Ù†Ù„ Ù…ØÛŒØ±ÛŒØª AHNG MUSIC\nÛŒÚ©ÛŒ Ø§Ø² Ú©Ù†ÛŒØ¯:\n\n"
-                "(Ø¯Ø³ØªÙˆØ±Ù‡Ø§ÛŒ Ù…ØªÙ†ÛŒ: /add /upload /addch /stats /channels /cancel)"،
-                صفحه کلید (ردیف ها))
-
-
-تابع def handle_action(action, chat_id, sender)
-    """©Ø§Ø± Ù‡Ø± Ø¯Ú©Ù…Ù‡ (Ú†Ù‡ Ú©Ù„ÛŒÚ © Ø¯Ø³ØªÙˆØ± Ù…ØªÙ†ÛŒ)."""
-    log.info("دکمه | اکشن=%s | فرستنده=%s | چت=%s", اکشن, فرستنده, chat_id)
-
-    اگر action.startswith("adm_") باشد:
-        اگر is_admin(sender) نباشد:
-            log.warning("اقدام مدیر از طرف غیر مدیر نادیده گرفته شد: %s", فرستنده)
-            بازگشت
-
-        اگر اکشن == "adm_add" باشد:
-            admin_state[sender] = {"mode": "await_add"}
-            return send(chat_id, "• Ø¢Ù‡Ù†Ú¯ Ø±Ø§ Ø§Ø±Ø³Ø§Ù„ ÛŒØ§ Ù ÙˆØ±ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯.\n"
-                                 "(Ø¯Ø± Ú©Ù¾Ø´Ù† Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒØ¯ Ø¨Ù†ÙˆÛŒØ³ÛŒØ¯: Ø§Ø³Ù… Ø¢ÙáÙ Ø®ÙˆØ§Ù†Ù†Ø¯Ù‡)")
-        اگر اکشن == "adm_upload" باشد:
-            admin_state[sender] = {"mode": "await_upload"}
-            return send(chat_id, "ðŸš€ Ø¢Ù‡Ù†Ú¯ Ø±Ø§ Ø§Ø±Ø³Ø§Ù„ ÛŒØ§ Ù ÙˆØ±ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯.\n"
-                                 "(Ø¯Ø± Ú©Ù¾Ø´Ù† Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒØ¯ Ø¨Ù†ÙˆÛŒØ³ÛŒØ¯: Ø§Ø³Ù… Ø¢ÙáÙ Ø®ÙˆØ§Ù†Ù†Ø¯Ù‡)")
-        اگر اکشن == "adm_stats" باشد:
-            آمار بازگشتی (chat_id)
-        اگر اکشن == "adm_channels" باشد:
-            لیست کانال‌ها (چت_آیدی) را برمی‌گرداند
-        اگر اکشن == "adm_addch" باشد:
-            admin_state[sender] = {"mode": "await_channel"}
-            return send(chat_id, "ðŸ“¢ Ø¢ÛŒØ¯ÛŒ Ú©Ø§Ù†Ø§Ù„ Ø±Ø§ Ø¨Ù Ø±Ø³ØªÛŒØ¯ (Ù…Ø«Ù„ @AhngOfficial).\n"
-                                 "Ø¹Ø¯ ÛŒÚ© Ù¾Ø³Øª Ø§Ø² Ù‡Ù…Ø§Ù† Ú©Ø§Ù†Ø§Ù„ Ø¨Ø±Ø§ÛŒ Ù…Ù† Ù ÙˆØ±Ù. Ú©Ù†ÛŒØ¯.\n"
-                                 "Ø±Ø¨Ø§Øª Ø¨Ø§ÛŒØ¯ Ø§Ø¯Ù…ÛŒÙ† Ú©Ø§Ù†Ø§Ù„ Ø¨Ø§Ø´Ø¯.")
-        اگر اکشن == "adm_cancel" باشد:
-            admin_state.pop(فرستنده، هیچکدام)
-            pending_channel_link.pop(فرستنده، هیچکدام)
-            بازگشت ارسال (chat_id, "â Œ Ù„ØºÙˆ Ø´Ø¯. Ø¨Ø±Ø§ÛŒ Ù¾Ù†Ù„: /panel")
-        اگر action.startswith("adm_text_") باشد:
-            sid = action[len("adm_text_"):]
-            admin_state[sender] = {"mode": "await_post_text", "sid": sid}
-            return send(chat_id, "âœ ï¸ Ù…ØªÙ† Ù¾Ø³Øª Ø±Ø§ Ø¨Ù†ÙˆÛŒØ³ÛŒØ¯ Ùˆ Ø¨Ù Ø±Ø³ØªÛŒØ¯:"
-        اگر action.startswith("adm_done_") باشد:
-            sid = action[len("adm_done_"):]
-            st = admin_state.get(sender) یا {}
-            اگر st.get("mode") != "await_done" یا str(st.get("sid") != sid:
-                return send(chat_id, "â Œ Ø§ÛŒÙ† ØØØ±Ø®ÙˆØ§Ø³Øª Ù…Ù†Ù‚Ø¶ÛŒ Ø´Ø¯Ù‡. Ø´Ø±ÙˆØ¹ Ú©Ù†ÛŒØ¯: /panel")
-            admin_state.pop(فرستنده، هیچکدام)
-            send(chat_id, "âœ… Ù¾Ø³Øª Ø¢Ù…Ø§Ø¯Ù‡ Ø´Ø¯. Ù¾ÛŒØ§Ù… Ú©Ù†ÛŒØ¯ ðŸ'‡")
-            تابع ()final_post را برمی‌گرداند ("chat_id", sid, st.get("text", ""))
-        بازگشت
-
-    اگر action.startswith("joined_song_") باشد:
-        song_id = action[len("joined_song_"):]
-        اگر song_id.isdigit() نباشد:
-            بازگشت
-        اگر is_member(فرستنده):
-            تابع send_song(chat_id, song_id) را برمی‌گرداند.
-        return send(chat_id, "â Œ Ù‡Ù†ÙˆØ² Ø¹Ø¶Ùˆ Ú©Ø§Ù†Ø§Ù„ Ù†ÛŒØ³ØªÛŒØ¯. Ø¹Ø¶Ùˆ Ø´ÙˆÛÙ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Â«Ø¹Ø¶Ùˆ Ø´Ø¯Ù…Â» Ø±Ø§ Ø¨Ø²Ù†ÛŒØ¯.")
-
-
-COMMAND_ACTIONS = {"/add": "adm_add", "/upload": "adm_upload", "/addch": "adm_addch",
-                   "/stats": "adm_stats", "/channels": "adm_channels", "/cancel": "adm_cancel"}
-
-
-تابع def handle_admin(پیام، شناسه چت، فرستنده، متن):
-    """Ù¾ÛŒØ§Ù…â€ŒÙ‡Ø§ÛŒ Ù…Ø¯ÛŒØ±. Ø§Ú¯Ø± Ú†ÛŒØ²ÛŒ Ù†ØªÛŒØ¬Ù‡â€ŒÛŒ ØºÛŒØ± هیچ Ø¨Ø±Ù…ÛŒâ€ŒÚ¯Ø±Ø¯Ø§Ù†Ø¯."""
-    f = پیام.دریافت("فایل")
-    fwd = message.get("forwarded_from") یا {}
-    st = admin_state.get(sender) یا {}
-    حالت = st.get("حالت")
-
-    # Û±) Ù ÙˆØ±ÙˆØ§Ø±Ø¯ Ù¾Ø³Øª Ú©Ø§Ù†Ø§Ù„ Ø¨Ø±Ø§ÛŒ Ø«Ø¨Øª Ú©Ø§Ù†Ø§ÙØØ³Ø¨Ù
-    اگر fwd و فرستنده در pending_channel_link باشند:
-        راهنما = fwd.get("from_chat_id")
-        اگر راهنما نباشد:
-            return send(chat_id, "â Œ Ø´Ù†Ø§Ø³Ù‡â€ŒÛŒ Ú©Ø§Ù†Ø§Ù„ Ø§Ø² Ù¾ÛŒØ§Ù… Ù Ù†Ø´Ø¯.")
-        لینک = pending_channel_link.pop(فرستنده)
-        db.execute("مقادیر را در کانال‌ها (راهنما، لینک) وارد یا جایگزین کن(?,?)", (راهنما، لینک))
-        db.commit()
-        log.info("کانال ذخیره شد | %s", راهنما)
-        return send(chat_id, "âœ… Ú©Ø§Ù†Ø§Ù„ Ø«Ø¨Øª Ø´Ø¯. ÛŒØ§Ø¯ØªØ§Ù† Ø¨Ø§Ø´Ø¯ Ø±Ø¨Ø§Øª Ø¯ØØ±Ù Ø§Ø¯Ù…ÛŒÙ† Ø¨Ø§Ø´Ø¯.")
-
-    # Û²) ØØ±ÛŒØ§Ù Øª Ù Ø§ÛŒÙ„ Ø¢Ù‡Ù†Ú¯
-    اگر ف:
-        ذخیره شده = save_song(پیام، فرستنده)
-        اگر ذخیره نشد:
-            return send(chat_id, "â Œ Ù Ø§ÛŒÙ„ Ø¢Ù‡Ù†Ú¯ Ø´Ù†Ø§Ø³Ø§ÛŒÛŒ Ù†Ø´Ø¯.")
-        سید، عنوان، هنرمند = ذخیره شده
-        لینک = لینک_آهنگ(sid)
-        اگر حالت == "await_upload" باشد:
-            # Ø¢Ù‡Ù†Ú¯ Ø¨Ø§ Ø¯Ú©Ù… Ù…Ø¯ÛŒØ± Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ù‡Ù…Ø§Ù† ØØ¸Ù‡ Ù…ØªÙ† Ø±Ø§ Ù‡Ù… Ø¨Ù Ø±Ø³ØªØØ
-            admin_state[sender] = {"mode": "await_post_text", "sid": sid}
-            kp = صفحه کلید ([[action_button(f"adm_text_{sid}", "âœ ï¸ Ø«Ø¨Øª Ù…ØªÙ† Ù¾Ø³Øª")]])
-            send_file(chat_id, f.get("file_id"), f"ðŸŽµ {title}\nðŸŽ¤ {artist}", kp)
-            ارسال بازگشتی (chat_id، f"âœ… Ø°Ø®ÛŒØ±Ù‡ Ø´Ø¯: {title} - {artist}\n\n"
-                                 f"ðŸ"— Ù„ÛŒÙ†Ú© Ø§Ø®ØªØµØ§ØµÛŒ:\n{link}\n\n"
-                                 "Ø¯Ú©Ù…Ù‡â€ŒÛŒ Â«Ø«Ø¨Øª Ù…ØªÙ† Ù¾Ø³ØªÂ» Ø±Ø§ Ø¨Ø²Ù†ÛŒØ¯ ÛŒØ§ Ù…Ø³ Ù¾Ø³Øª Ø±Ø§ Ø¨Ù Ø±Ø³ØªÛŒØ¯.")
-        admin_state.pop(فرستنده، هیچکدام)
-        return send(chat_id, f"âœ… ØØ®ÛŒØ±Ù‡ ØØØ¯: {title} - {artist}\n\nðŸ”— Ù„ÛŒÙ†Ú© ØªØªØ¯:\n{link}")
-
-    # Û³) ØªÙˆØ±Ù‡Ø§ (/start Ùˆ Ù†Ø§Ø´Ù†Ø§Ø® Ø§Ø¯Ø§Ù…Ù‡ Ù¾ÛŒØØØ§ Ú©Ù†Ù†Ø¯)
-    اگر متن با ("/") شروع شود:
-        cmd = text.split()[0].lower()
-        اگر cmd در COMMAND_ACTIONS باشد:
-            تابع handle_action(command_actions[cmd], chat_id, sender) را برمی‌گرداند.
-        اگر cmd == "/done" و mode == "await_done" باشد:
-            تابع handle_action(f"adm_done_{st['sid']}", chat_id, sender) را برمی‌گرداند.
-        اگر text.startswith("/delchannel "):
-            db.execute("حذف از کانال‌های WHERE guid=?", (text.split(maxsplit=1)[1].strip(),))
-            db.commit()
-            return send(chat_id, "âœ… Ú©Ø§Ù†Ø§Ù„ ØØ°Ù Ø´Ø¯.")
-        اگر متن با ("/del") شروع شود:
-            sid = text.split(maxsplit=1)[1].strip()
-            اگر sid.isdigit() نباشد:
-                return send(chat_id, "â Œ Ø´Ù†Ø§Ø³Ù‡â€ŒÛŒ Ø¢Ù‡Ù†Ú¯ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª.")
-            db.execute("حذف از آهنگ‌ها از کجا id=?", (sid,))
-            db.commit()
-            return send(chat_id, "âœ… Ø¢Ù‡Ù†Ú¯ ØØ°Ù Ø´Ø¯.")
-        هیچ کدام را برنگردانید
-
-    # Û´) Ù…Ø±ØÙÙ‡â€ŒÙ‡Ø§ÛŒ
-    اگر حالت == "await_post_text" و متن:
-        admin_state[sender] = {"mode": "await_song_link", "sid": st["sid"], "text": text}
-        return send(chat_id, "âœ… Ù…ØªÙ† Ø«Ø¨Øª Ø´Ø¯.\nðŸ”— ØØ§Ù„Ø§ Ù„ÛŒÙ†Ú© Ø§Ø®ØªØµØ§ØµÛŒ Ø¢Ù‡Ù†Ú¯ Ø±ØªÛ¯:\n\n" + song_link(st["sid"]))
-
-    اگر حالت == "await_song_link" و متن:
-        m = re.search(r"song_(\d+)", text)
-        اگر m یا m.group(1) نباشد!= str(st["sid"]):
-            return send(chat_id, "â Œ Ù„ÛŒÙ†Ú© ØØ±Ø³Øª Ù†ÛŒØ³Øª. Ù„ÛŒÙ†Ú© . Ø±Ø³ØªÛŒØ¯:\n" + آهنگ_پیوند (st["sid"]))
-        st["mode"] = "منتظر_انجام شدن"
-        admin_state[sender] = st
-        kp = صفحه کلید([[action_button(f"adm_done_{st['sid']}", "``````",
-                      action_button("adm_cancel"، "â Œ Ù„ØºÙˆ")]])
-        return send(chat_id, "âœ… Ù„ÛŒÙ†Ú© ØªØ£ÛŒÛŒØ¯ Ø´Ø¯. Â«ØªÙ…Ø§Ù…Â» Ø±Ø§ Ø¨Ø²Ù†ÛŒØ¯ ØªØ§ Ù Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø±Ø§ÛŒØªØ§Ù† Ø§Ø±Ø³Ø§Ù„ Ø´ÙˆØ¯.", kp)
-
-    اگر حالت mode == "await_done" باشد و متن در ("ØªÙ…Ø§Ù…", "ØªÙ…Ø§Ù….") باشد:
-        تابع handle_action(f"adm_done_{st['sid']}", chat_id, sender) را برمی‌گرداند.
-
-    اگر حالت == "await_channel" و متن:
-        اول = متن.split()[0]
-        اگر first.startswith("@") و len(first) > 2 باشد:
-            لینک = "https://rubika.ir/" + اول[1:]
-        الیف "rubika.ir/" در ابتدا یا "rubika.me/" در ابتدا:
-            لینک = اول
-        دیگری:
-            return send(chat_id, "â Œ Ù„ÛŒÙ†Ú© ÛŒØ§ Ø¢ÛŒØ¯ÛŒ Ú©Ø§Ù†Ø§Ù„ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª.")
-        pending_channel_link[sender] = لینک
-        admin_state.pop(فرستنده، هیچکدام)
-        return send(chat_id, "âœ… Ù„ÛŒÙ†Ú© Ø¯Ø±ÛŒØ§Ù Øª Ø´Ø¯. ØØ§ÙØ§ ÛŒÚ© Ø§Ø§² Ø¨Ø±Ø§ÛŒ Ù…Ù† Ù ÙˆØ±ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯.")
-
-    هیچ کدام را برنگردانید
-
-
-# =====================================================
-# Ù¾ÛŒØ§Ù…â€Ù‡Ø§
-# =====================================================
-شروع فرآیند (chat_id، فرستنده، payload):
-    log.info("شروع | فرستنده=%s | بار مفید=%s", فرستنده, بار مفید)
-    اگر payload.startswith("song_"):
-        تحویل (شناسه چت، فرستنده، بار مفید) را برمی‌گرداند
-    اگر payload.startswith(("adm_", "joined_song_")):
-        تابع handle_action(payload, chat_id, sender) را برمی‌گرداند.
-    اگر بار مفید نباشد:
-        اگر is_admin(فرستنده):
-            برگرداندن پنل مدیریت (چت آی‌دی)
-        return send(chat_id, "Ø³Ù„Ø§Ù… ðŸ'‹ Ø¨Ù‡ آهنگ موزیک Ø®ÙˆØ´ Ø¢Ù…Ø¯ÛŒØ¯.\n"
-                             "Ø¨Ø±Ø§ÛŒ Ø¯Ø±ÛŒØ§Ù Ø¢Ù‡Ù†Ú¯ Ø§Ø² Ø¯Ú©Ù…Ù‡â€ŒÛŒ ØØØ§Ù†Ù„ÙˆØ¯ Ø²ÛŒ Ø³Øªâ€ŒÙ‡Ø§ÛŒ Ú©Ø§Ù†Ø§Ù„ Ø§ØªÙ
-
-
-تابع def handle_message(پیام، شناسه چت):
-    اگر isinstance(message, dict) نباشد:
-        بازگشت
-    فرستنده = پیام.دریافت("شناسه_فرستنده", شناسه_چت)
-    متن = (message.get("text") or "").strip()
-    aux = message.get("aux_data") یا {}
-    اگر فرستنده نباشد:
-        بازگشت
-    اگر chat_id در بخش مدیریت باشد:
-        فرستنده = شناسه چت
-
-    db.execute("مقادیر(?,?) را در users(guid, join_at) وارد یا نادیده بگیر", (sender, int(time.time())))
-    db.commit()
-    log.info("پیام | فرستنده=%s | متن=%s", فرستنده, متن[:100])
-
-    اگر متن == "/myid" باشد:
-        return send(chat_id, f"ðŸ†” Ø´Ù†Ø§Ø³Ù‡â€ŒÛŒ Ø´Ù…Ø§:\n{فرستنده}\n\nðŸ'¬ Ø´Ù†Ø§Ø³Ù‡â€ŒÛŒ)Ø_ª"
-    اگر متن == "/ping" باشد:
-        return send(chat_id, f"pong âœ… Ø±Ø¨Ø§Øª Ø±ÙˆØ´Ù† Ø§Ø³Øª. Ø¯Ú©Ù… 'ØºÛŒØ±Ù Ø¹Ø§Ù„ (ØØ§Ù„Øª Ù„ÛŒÙ†Ú©)'}")
-
-    اگر aux.get("button_id"):
-        تابع handle_action(aux["button_id"], chat_id, sender) را برمی‌گرداند.
-
-    اگر is_admin(sender) و handle_admin(message, chat_id, sender, text) برابر با None نباشند:
-        بازگشت
-
-    اگر متن == "/panel" باشد:
-        اگر is_admin(sender) باشد، admin_panel(chat_id) را برمی‌گرداند، در غیر این صورت هیچکدام
-
-    اگر text.startswith("/start") یا aux.get("start_id") باشد:
-        قطعات = text.split(maxsplit=1)
-        اگر text.startswith("/start") و len(parts) > 1 باشد، payload = parts[1].strip() در غیر این صورت (aux.get("start_id") یا "")
-        تابع ()process_start(chat_id, sender, payload) را برمی‌گرداند.
-
-
-def handle_inline(im, fallback_chat=None):
-    """Ú©Ù„ÛŒÚ© Ø¯Ú©Ù…Ù‡â€ŒÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ (Ø§Ø² ÙˆØ¨â€ŒÙ‡ÙˆÚ© ÛŒØ§ getUpdates).""
-    اگر isinstance(im, dict) نباشد:
-        بازگشت
-    bid = (im.get("aux_data") or {}).get("button_id")
-    ‎chat_id = im.get("chat_id")‎ یا ‎fallback_chat‎
-    فرستنده = im.get("sender_id")
-    اگر chat_id در بخش مدیریت باشد:
-        فرستنده = فرستنده یا شناسه چت
-    log.info("کلیک درون خطی | دکمه=%s | فرستنده=%s | چت=%s", پیشنهاد، فرستنده، chat_id)
-    اگر bid و chat_id و sender باشند:
-        handle_action(پیشنهاد، chat_id، فرستنده)
-
-
-def process_update(u):
-    اگر isinstance(u, dict) نباشد:
-        بازگشت
-    t = u.get("نوع")
-    اگر t == "پیام حذف شده" باشد:
-        بازگشت
-    اگر t == "پیام جدید" باشد:
-        امتحان کنید:
-            handle_message(u.get("new_message") or {}, u.get("chat_id"))
-        به جز استثنا:
-            log.exception("خطای مدیریت پیام")
-        بازگشت
-    اگر u.get("inline_message"):
-        log.info("به‌روزرسانی درون‌خطی (نظرسنجی) | %s", str(u["inline_message"])[:200])
-        امتحان کنید:
-            handle_inline(u["inline_message"], u.get("chat_id"))
-        به جز استثنا:
-            log.exception("خطای کنترل‌کننده درون‌خطی")
-        بازگشت
-    log.info("به‌روزرسانی دیگر | %s", str(u)[:300])
-
-
-# =====================================================
-# ÙˆØ®â€ŒÙ‡ÙˆÚ© (Ø¨Ø±Ø§ÛŒ Ú©Ù„ÛŒÚ© Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ Ø´ÛŒØ´Ù‡â€Ø§ÛŒ)
-# =====================================================
-def handle_webhook(داده):
-    امتحان کنید:
-        log.info("WEBHOOK | %s", str(data)[:300])
-        به‌روزرسانی = data.get("به‌روزرسانی") یا {}
-        im = data.get("inline_message") یا upd.get("new_message")
-        اگر نه من:
-            بازگشت
-        با قفل:
-            handle_inline(im, update.get("chat_id"))
-    به جز استثنا:
-        log.exception("خطای کنترل‌کننده وب‌هوک")
-
-
-کلاس هوک (BaseHTTPRequestHandler):
-    def _reply(خود، کد = 200):
-        ارسال_پاسخ_خود(کد)
-        self.send_header("نوع محتوا", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"status":"OK"}')
-
-    تعریف do_POST(خود):
-        اگر self.path.split("?")[0] != WEBHOOK_PATH:
-            بازگشت به self._reply(404)
-        امتحان کنید:
-            n = int(self.headers.get("طول-محتوا") یا 0)
-            data = json.loads(self.rfile.read(n).decode("utf-8", "ignore") or "{}")
-        به جز استثنا:
-            داده = {}
-        پاسخ به خود (200)
-        threading.Thread(target=handle_webhook, args=(data,), daemon=True).start()
-
-    تعریف do_GET(خود):
-        پاسخ به خود (200)
-
-    def log_message(خود، *args):
-        عبور
-
-
-شروع_وب‌هوک ():
-    """Ø³Ø±ÙˆØ±Ø±Ø§ Ø¨Ø§Ù„Ø§ Ù…ÛŒâ€ŒØ¢ÙˆØ±ØØ¯ Ø¢ØØØØ±Ø³ Ø±Ø§ Ø¨Ù‡ Ù…ÛŒâ€Ø¯Ù‡Ø¯ Ø§Ú¯Ø± Ù†Ø´ØØŒ ØØ§ÙØª Ù„ÛŒÙ†Ú©. Ù…ÛŒâ€ŒÙ…Ø§Ù†Ø¯."""
-    USE_INLINE سراسری
-    اگر PUBLIC_URL نباشد:
-        log.warning("PUBLIC_URL ØªÙ†Ø¸ÛŒÙ… Ù†Ø´Ø¯Ù‡ -> ©Ø§Ø± Ù…ÛŒâ€ŒÚ©Ù†Ù†ØØØŒ Ù†Ù‡ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ.")
-        بازگشت
-    امتحان کنید:
-        سرور = ThreadingHTTPServer(("0.0.0.0", PORT), Hook)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        log.info("سرور وب هوک | پورت=%s | مسیر=%s", پورت, WEBHOOK_PATH)
-    به جز استثنا به عنوان e:
-        log.error("سرور وب هوک با خطا مواجه شد | %s", e)
-        بازگشت
-    آدرس اینترنتی = آدرس اینترنتی عمومی + مسیر وب هوک
-    res = call("updateBotEndpoints", url=url, type="ReceiveInlineMessage")
-    USE_INLINE = ok(res) و bool(res)
-    log.info("ثبت وب هوک | تایید=%s | آدرس اینترنتی=%s | درون خطی=%s", تایید(res), آدرس اینترنتی, USE_INLINE)
-    اگر نه USE_INLINE:
-        log.warning("Ø«Ø¨Øª ÙˆØ¨â€ŒÙ‡ÙˆÚ© Ø¬ÙˆØ§Ø¨ Ù†ØØØ§Ø¯ ->
-
-
-# =====================================================
-# ØÙ„Ù‚Ù‡â€ŒÛŒ Ø§ØµÙ„ÛŒ
-# =====================================================
-تابع def skip_backlog():
-    """Ù¾ÛŒØ§Ù…â€ŒÙ‡Ø§ÛŒ Ù‚Ø¯ÛŒÙ…ÛŒÙ Ø²Ù…Ø§Ù† Ø®Ø§Ù…ÙˆØ´ Ø¨ÙˆØØØ¯Ù† Ø±Ø§Ù Ù…ÛŒâ€ŒÚ©Ù†Ø¯."""
-    افست، صرف نظر شده = هیچکدام، 0
-    برای _ در محدوده (20):
-        d = {"حد": ۱۰۰}
-        اگر جبران شود:
-            d["offset_id"] = افست
-        داده = (call("getUpdates", **d).get("data") یا {})
-        ups = data.get("updates") یا []
-        رد شد += لن(یو پی اس)
-        nxt = data.get("next_offset_id")
-        اگر nxt:
-            افست = nxt
-        اگر len(ups) < 100 باشد:
-            استراحت
-    log.info("%s به‌روزرسانی قدیمی رد شد", رد شد)
-    بازگشت آفست
-
-
-تابع اصلی ():
-    اگر BOT_TOKEN نباشد:
-        raise SystemExit("BOT_TOKEN ØªÙ†Ø¸ÛŒÙ… Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.")
-    log.info("آهنگ شروع شد | ربات=@%s | مدیران=%s", BOT_USERNAME, len(ADMINS))
-    نام کاربری را شناسایی کنید()
-    شروع_وب‌هوک()
-    افست = skip_backlog()
-    اگر os.getenv("NOTIFY_ADMINS", "1") == "1":
-        برای یک مدیر:
-            r = send(a, "âœ… Ø±Ø¨Ø§Øª Ø±ÙˆØ´Ù† Ø´Ø¯.\n"
-                        f"Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ: Ù„ÛŒÙ†Ú©)'}")
-            log.info("اطلاعیه شروع به کار | مدیر=%s | تایید=%s", a, ok(r))
-            اگر خوب باشد(r):
-                پنل مدیریت(a)
-    در حالی که درست است:
-        امتحان کنید:
-            d = {"حد": ۱۰۰}
-            اگر جبران شود:
-                d["offset_id"] = افست
-            res = فراخوانی("getUpdates", **d)
-            اگر res یا res.get("status") در (هیچکدام، "OK") نباشد:
-                زمان.خواب(2)
-                ادامه
-            data = res.get("data") یا {}
-            برای u در data.get("updates") یا []:
-                با قفل:
-                    به‌روزرسانی فرآیند(u)
-            اگر داده.دریافت("next_offset_id"):
-                افست = داده["next_offset_id"]
-            زمان.خواب(POLL_INTERVAL)
-        به جز وقفه کیبورد:
-            log.info("ربات متوقف شد")
-            استراحت
-        به جز استثنا:
-            log.exception("خطای حلقه اصلی")
-            زمان.خواب(3)
-
-
-اگر __name__ == "__main__":
-    اصلی ()
+
+bot = Client(name=SESSION_NAME)
+
+# ---------- داده‌ها ----------
+try:
+    with open(STATS_FILE, "r", encoding="utf-8") as f:
+        STATS = json.load(f)
+except Exception:
+    STATS = {}
+
+_last_save = 0.0
+
+
+def save_stats(force=False):
+    global _last_save
+    if force or time.time() - _last_save > 20:
+        try:
+            with open(STATS_FILE, "w", encoding="utf-8") as f:
+                json.dump(STATS, f, ensure_ascii=False)
+            _last_save = time.time()
+        except Exception:
+            pass
+
+
+msg_times = defaultdict(lambda: deque(maxlen=SPAM_LIMIT + 2))
+warns = defaultdict(int)
+owner_cache = {}   # group_guid -> (set(admin_guids), owner_guid, time)
+BOT_GUID = None
+PENDING = {}                       # author_guid -> لینکی که منتظر قبول قوانین است
+recent_msgs = defaultdict(lambda: deque(maxlen=50))
+_promo_task = None
+
+try:
+    with open(PROMO_FILE, "r", encoding="utf-8") as f:
+        PROMO = json.load(f)
+except Exception:
+    PROMO = {}
+PROMO.setdefault("exempt", [])     # گروه‌هایی که ماهانه پرداخت کرده‌اند
+PROMO.setdefault("last_sent", {})  # gid -> تاریخ آخرین تبلیغ
+
+
+def save_promo():
+    try:
+        with open(PROMO_FILE, "w", encoding="utf-8") as f:
+            json.dump(PROMO, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def peak_hours(g):
+    """۳ ساعت شلوغ گروه (اگر داده کافی نباشد، ساعت پیش‌فرض)"""
+    hours = g.get("hours", {})
+    if g.get("total", 0) < PROMO_MIN_DATA or not hours:
+        return {PROMO_DEFAULT_HOUR}
+    top = sorted(hours, key=lambda h: -hours[h])[:3]
+    return {int(h) for h in top}
+
+
+async def promo_loop():
+    """هر ۵ دقیقه چک می‌کند؛ روزی حداکثر یک تبلیغ، در ساعت شلوغ هر گروه"""
+    while True:
+        try:
+            now = datetime.now(TZ)
+            today = now.strftime("%Y-%m-%d")
+            for gid, g in list(STATS.items()):
+                if gid in PROMO["exempt"] or PROMO["last_sent"].get(gid) == today:
+                    continue
+                if now.hour not in peak_hours(g):
+                    continue
+                active = [t for t in recent_msgs[gid] if time.time() - t < 600]
+                if len(active) < PROMO_ACTIVE_MSGS:
+                    continue   # گروه الان ساکته؛ دور بعد دوباره چک می‌شود
+                try:
+                    await bot.send_message(gid, random.choice(PROMO_MESSAGES).format(ch=PROMO_CHANNEL))
+                    PROMO["last_sent"][gid] = today
+                    save_promo()
+                    await asyncio.sleep(2)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        await asyncio.sleep(300)
+
+
+def ensure_promo_task():
+    global _promo_task
+    if _promo_task is None or _promo_task.done():
+        _promo_task = asyncio.get_event_loop().create_task(promo_loop())
+
+
+# ---------- اخطارهای مالک ----------
+try:
+    with open(WARNS_FILE, "r", encoding="utf-8") as f:
+        OWNER_WARNS = json.load(f)       # "gid:uid" -> تعداد اخطار
+except Exception:
+    OWNER_WARNS = {}
+
+
+try:
+    with open(MUTE_FILE, "r", encoding="utf-8") as f:
+        MUTED = json.load(f)             # "gid:uid" -> زمان پایان سکوت (timestamp)
+except Exception:
+    MUTED = {}
+
+
+def save_mutes():
+    try:
+        with open(MUTE_FILE, "w", encoding="utf-8") as f:
+            json.dump(MUTED, f)
+    except Exception:
+        pass
+
+
+def is_muted(gid, uid):
+    """سریع و بدون await؛ سکوت‌های منقضی‌شده پاک می‌شوند"""
+    k = f"{gid}:{uid}"
+    end = MUTED.get(k)
+    if not end:
+        return False
+    if time.time() >= end:
+        MUTED.pop(k, None)
+        save_mutes()
+        return False
+    return True
+
+
+def save_warns():
+    try:
+        with open(WARNS_FILE, "w", encoding="utf-8") as f:
+            json.dump(OWNER_WARNS, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+# ---------- کمکی‌ها ----------
+async def get_roles(group_guid):
+    """برگرداندن (مالک گروه, مجموعه ادمین‌ها) با کش ۵ دقیقه‌ای"""
+    cached = owner_cache.get(group_guid)
+    if cached and time.time() - cached[2] < 300:
+        return cached[1], cached[0]
+    owner, admins = None, set()
+    try:
+        res = await bot.get_group_admin_members(group_guid)
+        members = res.in_chat_members if hasattr(res, "in_chat_members") else res.get("in_chat_members", [])
+        for m in members:
+            g = getattr(m, "member_guid", None) or (m.get("member_guid") if isinstance(m, dict) else None)
+            jt = getattr(m, "join_type", None) or (m.get("join_type") if isinstance(m, dict) else "")
+            if g:
+                admins.add(g)
+                if str(jt).lower() == "creator":
+                    owner = g
+    except Exception:
+        pass
+    owner_cache[group_guid] = (admins, owner, time.time())
+    return owner, admins
+
+
+async def is_privileged(group_guid, user_guid):
+    """ادمین کل بات، مالک گروه یا ادمین گروه"""
+    if user_guid in ADMIN_GUIDS:
+        return True
+    owner, admins = await get_roles(group_guid)
+    return user_guid == owner or user_guid in admins
+
+
+async def is_owner_or_botadmin(group_guid, user_guid):
+    """مالک همین گروه (فقط داخل همان گروه) یا ادمین کل بات"""
+    if user_guid in ADMIN_GUIDS:
+        return True
+    owner, _ = await get_roles(group_guid)
+    return user_guid == owner
+
+
+async def safe_delete(guid, msg_id):
+    try:
+        await bot.delete_messages(guid, [msg_id])
+        return True
+    except Exception:
+        return False
+
+
+def get_attr(obj, name, default=None):
+    v = getattr(obj, name, None)
+    if v is None and isinstance(obj, dict):
+        v = obj.get(name)
+    return v if v is not None else default
+
+
+async def get_replied_author(gid, msg):
+    """GUID نویسنده‌ی پیامی که روی آن ریپلای شده (یا None)"""
+    reply_id = get_attr(msg, "reply_to_message_id")
+    if not reply_id:
+        return None, None
+    try:
+        res = await bot.get_messages_by_id(gid, [reply_id])
+        msgs = get_attr(res, "messages", [])
+        if msgs:
+            return get_attr(msgs[0], "author_object_guid"), reply_id
+    except Exception:
+        pass
+    return None, reply_id
+
+
+async def say(gid, text, reply_id=None):
+    try:
+        if reply_id:
+            return await bot.send_message(gid, text, reply_to_message_id=reply_id)
+    except Exception:
+        pass
+    return await bot.send_message(gid, text)
+
+
+# ---------- عضویت اجباری ----------
+CHANNEL_GUID = None
+MEMBER_OK = {}       # user_guid -> زمان آخرین تایید عضویت
+WAIT_LINK = {}       # user_guid -> لینک گروهی که قبل از عضویت فرستاده
+
+
+async def get_channel_guid():
+    global CHANNEL_GUID
+    if CHANNEL_GUID:
+        return CHANNEL_GUID
+    res = await bot.get_object_by_username(PROMO_CHANNEL.lstrip("@"))
+    ch = get_attr(res, "channel") or {}
+    CHANNEL_GUID = get_attr(ch, "channel_guid")
+    return CHANNEL_GUID
+
+
+async def is_channel_member(uid):
+    """بررسی عضویت در کانال. بات باید در کانال ادمین باشد تا لیست اعضا را ببیند."""
+    if time.time() - MEMBER_OK.get(uid, 0) < MEMBER_CACHE_SEC:
+        return True
+    try:
+        guid = await get_channel_guid()
+        start = None
+        for _ in range(300):
+            res = await bot.get_channel_all_members(guid, start_id=start)
+            members = get_attr(res, "in_chat_members", []) or []
+            if any(get_attr(m, "member_guid") == uid for m in members):
+                MEMBER_OK[uid] = time.time()
+                return True
+            if not get_attr(res, "has_continue", False):
+                return False
+            start = get_attr(res, "next_start_id")
+            if not start:
+                return False
+        return False
+    except Exception as e:
+        # اگر بات ادمین کانال نباشد بررسی ممکن نیست؛ برای اینکه کاربران گیر نکنند عبور می‌دهیم
+        print("[عضویت اجباری] خطا در بررسی عضویت - بات را ادمین کانال کنید:", e)
+        return True
+
+
+# ---------- پیوی: دریافت لینک و عضویت ----------
+@bot.on_message_updates(filters.is_private)
+async def private_handler(update: Update):
+    text = (update.text or "").strip()
+    author = update.author_guid
+
+    # --- عضویت اجباری (ادمین بات و /myguid معاف) ---
+    if author not in ADMIN_GUIDS and text != "/myguid":
+        if not await is_channel_member(author):
+            m0 = JOIN_LINK_RE.search(text)
+            if m0:
+                WAIT_LINK[author] = m0.group(0)
+            return await update.reply(FORCE_JOIN_TEXT)
+        if text in CHECK_WORDS:
+            link0 = WAIT_LINK.pop(author, None)
+            if link0:
+                PENDING[author] = link0
+                return await update.reply("✅ عضویتت تأیید شد 🌹\n\n" + RULES_TEXT)
+            return await update.reply("✅ عضویتت تأیید شد 🌹 حالا لینک گروهت رو بفرست.")
+
+    if text in ("/start", "start", "شروع"):
+        return await update.reply(
+            f"سلام 👋 من {BOT_NAME} هستم، ربات مدیریت گروه.\n"
+            "لینک گروه یا کانالت رو بفرست تا عضو بشم، بعدش منو ادمین کن 🌹"
+        )
+    if text == "/myguid":
+        return await update.reply(f"GUID شما:\n{author}")
+
+    ensure_promo_task()
+    if text not in ACCEPT_WORDS:
+        m = JOIN_LINK_RE.search(text)
+        if m:
+            PENDING[author] = m.group(0)
+            return await update.reply(RULES_TEXT)
+    elif author in PENDING:
+        link = PENDING.pop(author)
+        kind = JOIN_LINK_RE.search(link).group(1).lower()
+        try:
+            if kind == "joinc":
+                await bot.join_channel_by_link(link)
+            else:
+                await bot.join_group(link)
+            await update.reply("✅ عضو شدم! لطفاً منو ادمین کن تا بتونم مدیریت کنم.")
+        except Exception:
+            try:  # تلاش با روش دیگر
+                await bot.join_group(link)
+                await update.reply("✅ عضو شدم! منو ادمین کن تا کامل کار کنم.")
+            except Exception:
+                await update.reply("❌ نتونستم عضو بشم. لینک معتبره؟ (ممکنه محدودیت یا لینک منقضی باشه)")
+        return
+
+    if author in ADMIN_GUIDS and text == "/stats":
+        total = sum(g.get("total", 0) for g in STATS.values())
+        await update.reply(f"📊 گروه‌های ثبت‌شده: {len(STATS)}\nمجموع پیام‌ها: {total}")
+
+
+# ---------- گروه‌ها ----------
+@bot.on_message_updates(filters.is_group)
+async def group_handler(update: Update):
+    global BOT_GUID
+    gid = update.object_guid
+    uid = update.author_guid
+    mid = update.message_id
+    text = (update.text or "").strip()
+
+    # --- کاربر در سکوت: فوراً حذف (قبل از هر کار دیگری) ---
+    if uid and is_muted(gid, uid):
+        await safe_delete(gid, mid)
+        return
+
+    # --- پیام‌های سرویس: خوش‌آمدگویی ---
+    msg = get_attr(update, "message") or {}
+    mtype = str(get_attr(msg, "type", "")).lower()
+    if mtype == "event" or not text and get_attr(msg, "event_data"):
+        ev = get_attr(msg, "event_data") or {}
+        etype = str(get_attr(ev, "type", ""))
+        if etype in ("JoinedGroupByLink", "AddedGroupMembers"):
+            who = get_attr(get_attr(ev, "performer_object") or {}, "title", "") or \
+                  get_attr(get_attr(ev, "peer_objects", [{}])[0] if get_attr(ev, "peer_objects") else {}, "title", "") or "عزیز"
+            welcome = (
+                f"🌹✨ سلام {who} عزیز، به گروه خوش آمدی! ✨🌹\n\n"
+                "💎 خوشحالیم که کنارمونی\n"
+                "📌 لطفاً قوانین رو رعایت کن:\n"
+                "   ⛔ ارسال لینک و آیدی ممنوع\n"
+                "   ⛔ اسپم و تبلیغات ممنوع\n"
+                "   ✅ احترام به همه اعضا\n\n"
+                f"🤖 مدیریت با {BOT_NAME}"
+            )
+            await bot.send_message(gid, welcome)
+        return
+
+    if not text or not uid:
+        return
+
+    # --- آمار ---
+    g = STATS.setdefault(gid, {"total": 0, "users": {}})
+    g["total"] += 1
+    g["users"][uid] = g["users"].get(uid, 0) + 1
+    hr = str(datetime.now(TZ).hour)
+    g.setdefault("hours", {})[hr] = g["hours"].get(hr, 0) + 1
+    recent_msgs[gid].append(time.time())
+    save_stats()
+    ensure_promo_task()
+
+    # --- ادمین کل بات: فعال/غیرفعال کردن حذف تبلیغ برای این گروه (پرداخت ماهانه) ---
+    if uid in ADMIN_GUIDS and text in ("/vip", "/unvip"):
+        if text == "/vip" and gid not in PROMO["exempt"]:
+            PROMO["exempt"].append(gid)
+        elif text == "/unvip" and gid in PROMO["exempt"]:
+            PROMO["exempt"].remove(gid)
+        save_promo()
+        return await update.reply("✅ تبلیغات این گروه غیرفعال شد." if text == "/vip" else "✅ تبلیغات این گروه فعال شد.")
+
+    privileged = await is_privileged(gid, uid)
+    owner_or_admin = await is_owner_or_botadmin(gid, uid)
+
+    # --- بن / اخطار: مالک روی پیام عضو ریپلای می‌زند ---
+    if owner_or_admin and text in (BAN_WORDS + WARN_WORDS + UNWARN_WORDS + PROMOTE_WORDS + DEMOTE_WORDS + MUTE_WORDS + UNMUTE_WORDS):
+        target, rid = await get_replied_author(gid, msg)
+        if not target:
+            return await update.reply("↩️ برای استفاده، روی پیام عضو ریپلای بزن و بنویس: بن / اخطار / سکوت / ارتقا")
+        if BOT_GUID is None:
+            try:
+                me = await bot.get_me()
+                BOT_GUID = get_attr(get_attr(me, "user", me), "user_guid")
+            except Exception:
+                pass
+        # --- ارتقا به ادمین / عزل ---
+        if text in PROMOTE_WORDS + DEMOTE_WORDS:
+            owner_g, admins_g = await get_roles(gid)
+            if target == BOT_GUID or target == owner_g:
+                return await update.reply("⛔ این کار روی مالک گروه یا خود ربات ممکن نیست.")
+            promoting = text in PROMOTE_WORDS
+            if promoting and target in admins_g:
+                return await say(gid, "ℹ️ این کاربر از قبل ادمین است.", rid)
+            if not promoting and target not in admins_g:
+                return await say(gid, "ℹ️ این کاربر ادمین نیست.", rid)
+            try:
+                if promoting:
+                    await bot.set_group_admin(gid, target, access_list=ADMIN_ACCESS, action="SetAdmin")
+                else:
+                    await bot.set_group_admin(gid, target, access_list=[], action="UnsetAdmin")
+                owner_cache.pop(gid, None)   # کش نقش‌ها تازه شود
+                return await say(gid, "👑 کاربر به دستور مالک گروه ادمین شد." if promoting
+                                 else "✅ ادمینی این کاربر برداشته شد.", rid)
+            except Exception:
+                return await say(gid, "❌ نشد. منو ادمین گروه کن و دسترسی «افزودن ادمین» بهم بده.", rid)
+
+        if target == BOT_GUID or await is_privileged(gid, target):
+            return await update.reply("⛔ روی مالک، ادمین‌ها و خود ربات نمی‌شه بن یا اخطار داد.")
+        key = f"{gid}:{target}"
+
+        if text in MUTE_WORDS:
+            MUTED[key] = time.time() + MUTE_HOURS * 3600
+            save_mutes()
+            return await say(gid, f"🔇 کاربر به دستور مالک گروه به مدت {MUTE_HOURS} ساعت در سکوت قرار گرفت.\nپیام‌هاش حذف می‌شه.", rid)
+        if text in UNMUTE_WORDS:
+            MUTED.pop(key, None)
+            save_mutes()
+            return await say(gid, "🔊 سکوت این کاربر برداشته شد.", rid)
+
+        if text in UNWARN_WORDS:
+            OWNER_WARNS.pop(key, None)
+            save_warns()
+            return await say(gid, "✅ اخطارهای این کاربر پاک شد.", rid)
+
+        if text in BAN_WORDS:
+            try:
+                await bot.ban_group_member(gid, target)
+                OWNER_WARNS.pop(key, None)
+                save_warns()
+                return await say(gid, "🚫 کاربر به دستور مالک گروه حذف شد.", rid)
+            except Exception:
+                return await say(gid, "❌ نتونستم حذفش کنم. منو ادمین گروه کن (با دسترسی حذف عضو).", rid)
+
+        # اخطار
+        OWNER_WARNS[key] = OWNER_WARNS.get(key, 0) + 1
+        n = OWNER_WARNS[key]
+        if n >= OWNER_MAX_WARNS:
+            try:
+                await bot.ban_group_member(gid, target)
+                OWNER_WARNS.pop(key, None)
+                save_warns()
+                return await say(gid, f"🚫 اخطار {n}/{OWNER_MAX_WARNS} — کاربر به دلیل رسیدن به سقف اخطار از گروه حذف شد.", rid)
+            except Exception:
+                save_warns()
+                return await say(gid, f"⚠️ اخطار {n}/{OWNER_MAX_WARNS} — به سقف رسید ولی نتونستم حذفش کنم. منو ادمین گروه کن.", rid)
+        save_warns()
+        return await say(gid, f"⚠️ اخطار {n}/{OWNER_MAX_WARNS} از طرف مالک گروه.\nبا رسیدن به {OWNER_MAX_WARNS} اخطار از گروه حذف می‌شی.", rid)
+
+    # --- فرمان‌های مالک گروه ---
+    if owner_or_admin and text in ("/panel", "پنل"):
+        return await update.reply(
+            f"⚙️ پنل {BOT_NAME}\n"
+            "• آمار گپ — آمار پیام‌ها\n"
+            "• لینک و آیدی و اسپم: فعال ✅\n"
+            "فقط مالک گروه می‌تونه به این دستورات دسترسی داشته باشه."
+        )
+
+    # --- حذف لینک و آیدی (مالک و ادمین‌ها معاف) ---
+    if not privileged:
+        if LINK_RE.search(text) or ID_RE.search(text):
+            await safe_delete(gid, mid)
+            await bot.send_message(gid, "⛔ ارسال لینک و آیدی در این گروه ممنوعه!")
+            return
+
+        # --- ضد اسپم ---
+        key = (gid, uid)
+        now = time.time()
+        dq = msg_times[key]
+        dq.append(now)
+        recent = [t for t in dq if now - t <= SPAM_WINDOW]
+        if len(recent) >= SPAM_LIMIT:
+            await safe_delete(gid, mid)
+            warns[key] += 1
+            if warns[key] >= SPAM_MAX_WARNS:
+                try:
+                    await bot.ban_group_member(gid, uid)
+                    await bot.send_message(gid, "🚫 کاربر به دلیل اسپم از گروه حذف شد.")
+                except Exception:
+                    await bot.send_message(gid, "🚫 اسپم ممنوع! (برای حذف کاربر منو ادمین کنید)")
+                warns[key] = 0
+            else:
+                await bot.send_message(gid, f"⚠️ اسپم ممنوعه! اخطار {warns[key]}/{SPAM_MAX_WARNS}")
+            dq.clear()
+            return
+
+    # --- پاسخ به ریپلای روی بات / صدا زدن اسم بات ---
+    called = BOT_NAME in text or "دنی اپ" in text
+    replied_to_bot = False
+    reply_id = get_attr(msg, "reply_to_message_id")
+    if reply_id:
+        try:
+            if BOT_GUID is None:
+                me = await bot.get_me()
+                BOT_GUID = get_attr(get_attr(me, "user", me), "user_guid")
+            res = await bot.get_messages_by_id(gid, [reply_id])
+            msgs = get_attr(res, "messages", [])
+            if msgs and get_attr(msgs[0], "author_object_guid") == BOT_GUID:
+                replied_to_bot = True
+        except Exception:
+            pass
+
+    if called or replied_to_bot:
+        clean = text.replace(BOT_NAME, "").strip()
+        if "آمار" in clean:
+            top = sorted(g["users"].items(), key=lambda x: -x[1])[:5]
+            lines = [f"{i+1}. {n} پیام" for i, (_, n) in enumerate(top)]
+            return await update.reply(
+                f"📊 آمار گپ\n💬 مجموع پیام‌ها: {g['total']}\n"
+                f"👥 کاربران فعال: {len(g['users'])}\n🏆 برترین‌ها:\n" + "\n".join(lines)
+            )
+        for k, answers in GREETINGS.items():
+            if k in clean:
+                return await update.reply(answers[g["total"] % len(answers)])
+
+
+if __name__ == "__main__":
+    print(f"{BOT_NAME} در حال اجراست ...")
+    try:
+        bot.run()
+    finally:
+        save_stats(force=True)
